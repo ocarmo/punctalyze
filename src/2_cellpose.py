@@ -44,14 +44,14 @@ def apply_cellpose(images, image_type='sam', diameter=None, flow_threshold=0.4, 
 
     """
     model = models.CellposeModel(model_type=image_type, gpu=use_gpu)
+    images = [img.astype(np.uint16) for img in images]
 
     if big_images == True:
         # sizes for resizing
         smol_size = (1024, 1024)
         orig_size = images[0].shape[1:]
 
-        # convert to uint16 and resize
-        images = [img.astype(np.uint16) for img in images]
+        # resize
         resized_images = []
         for img in images:
             smol_arrs = []
