@@ -8,6 +8,7 @@ from skimage.segmentation import clear_border
 from skimage.io import imread
 from loguru import logger
 import napari
+from qtpy.QtWidgets import QApplication
 
 logger.info('import ok')
 
@@ -120,14 +121,20 @@ def filter_masks_auto(image_stack, mask_stack, filter_fluoro=False):
 # Manual QC
 def validate_with_napari(image_stack, image_name, mask_stack):
     """Launch napari, allow user to edit masks, then save upon exit."""
-    viewer = napari.view_image(image_stack, name='image_stack')
+    app = QApplication.instance()
+    if not app:
+        app = QApplication([])
+
+    viewer = napari.Viewer()
+    viewer.add_image(image_stack, name='image_stack')
     viewer.add_labels(mask_stack[0], name='cells')
     viewer.add_labels(mask_stack[1], name='nuclei')
 
-    # Block until viewer window is closed
-    napari.run()
+    # Show and block until window closed
+    viewer.window._qt_window.show()
+    app.exec_()
 
-    # Get updated label data after user edits and closes napari
+    # After closing the window, get edited data
     cells = viewer.layers['cells'].data
     nuclei = viewer.layers['nuclei'].data
 
