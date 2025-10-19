@@ -64,7 +64,7 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
     fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
     plt.close(fig)
 
-
+# TODO how to make more dynamic so we can plot without hue?
 def plot_no_stats(data_raw, data_agg, features, title, save_name, x='tag', hue='condition', order=None, palette=None):
     fig, axes = plt.subplots(nrows=5, ncols=3, figsize=(15, 15))
     axes = axes.flatten()
@@ -91,7 +91,7 @@ def plot_no_stats(data_raw, data_agg, features, title, save_name, x='tag', hue='
     fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
     plt.close(fig)
 
-
+# TODO find all instances of g3bp/rhm1 and make dynamic
 def plot_partition_coefficients(data_raw, data_agg, save_name, x='tag', hue='condition', order=None):
     palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
 
@@ -138,9 +138,14 @@ if __name__ == '__main__':
             'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff',
             'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean']
 
-    conditions = ['PBS', 'NaAsO2', 'HS']
-    # paired_conditions = combinations(conditions, 2)
     # could use combinations function to generate pairs dynamically, but here we define them explicitly
+    # paired_conditions = combinations(conditions, 2)
+    conditions = ['PBS', 'NaAsO2', 'HS']
+
+    # TODO generate paired conditions dynamically
+    # TODO generate conditions list dynamically
+    # TODO generate color platte dynamically
+    # TODO make order alphabetical as default
     paired_conditions = [(('PBS', 'GFP'), ('PBS', 'FLAG')),
                          (('NaAsO2', 'GFP'), ('NaAsO2', 'FLAG')),
                          (('HS', 'GFP'), ('HS', 'FLAG'))]
