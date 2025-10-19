@@ -43,7 +43,8 @@ def calculate_cell_features(df):
         'coi1_partition_coeff': 'mean',
         'cell_cv': 'mean',
         'cell_skew': 'mean',
-        'cell_coi1_intensity_mean': 'mean'
+        'cell_coi1_intensity_mean': 'mean',
+        'puncta_intensity_mean': 'mean'
     })
 
     # Flatten MultiIndex columns from aggregation
@@ -68,6 +69,7 @@ def calculate_cell_features(df):
         'cell_cv_mean': 'cell_cv',
         'cell_skew_mean': 'cell_skew',
         'cell_coi1_intensity_mean_mean': 'cell_coi1_intensity_mean',
+        'puncta_intensity_mean_mean': 'puncta_intensity_mean',
         'cell_size_mean': 'cell_size'
     })
 
@@ -112,7 +114,7 @@ if __name__ == '__main__':
     cols = ['cell_size', 'mean_puncta_area', 'puncta_area_proportion', 'puncta_count',
         'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'avg_eccentricity',
         'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff',
-        'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean']
+        'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean', 'puncta_intensity_mean']
 
     # remove outliers based on z-score
     summary = summary[(np.abs(stats.zscore(summary[cols[:-1]])) < 3).all(axis=1)]
