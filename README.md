@@ -1,11 +1,11 @@
 ## Fluorescence image analyses
-This repository contains image analysis scripts adapted by Sovanny Taylor and Olivia M. S. Carmo, adapted from previous work led by Olivia M. S. Carmo and Dezerae Cox<sup id="a1">[1](#f1)</sup> [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6747921.svg)](https://github.com/ocarmo/EMP1-trafficking_PTP7-analysis/tree/v1.1)
+This repository contains image analysis scripts used in the Boeynaems lab at the Baylor College of Medicine in Houston, TX, USA. These scripts were adapted by Sovanny Taylor and Olivia M. S. Carmo for analysis of intracellular puncta to compare puncta features between conditions, and calculate other useful information like partitioning coefficient. The structure and strategy was adapted from previous work led by Olivia M. S. Carmo and Dezerae Cox<sup id="a1">[1](#f1)</sup> [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6747921.svg)](https://github.com/ocarmo/EMP1-trafficking_PTP7-analysis/tree/v1.1)
 
 ### Analysis software
 This repo relies extensively on the following python packages: [CellPose](https://www.cellpose.org/)<sup id="a2">[2](#f2)</sup>, [napari](https://napari.org/)<sup id="a3">[3](#f3)</sup>, and [scikit-image](https://scikit-image.org/)<sup id="a4">[4](#f4)</sup>
 
 ### Reproducing workflow
-See the associated template README.md for setup instructions. Run the scripts in the order indicated by the script prefix.
+See the (associated template)[https://github.com/ocarmo/punctalyze-template] README.md for setup instructions. Run the scripts in the order indicated by the script prefix. To create a suitable conda environment, run each line of the ```environment_setup.md``` in succession in your command prompt. 
 
 ## References
 <b id="f1">1.</b> This repository format adapted from https://github.com/ocarmo/EMP1-trafficking_PTP7-analysis [↩](#a1)
