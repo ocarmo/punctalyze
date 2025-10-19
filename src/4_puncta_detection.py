@@ -18,7 +18,7 @@ from scipy.stats import skewtest
 from loguru import logger
 import functools
 # special import, path to script
-napari_utils_path = 'src/3_napari.py'
+napari_utils_path = 'src/3_napari.py' # adjust as needed
 
 # load the module dynamically due to annoying file name
 spec = importlib.util.spec_from_file_location("napari", napari_utils_path)
@@ -220,6 +220,8 @@ def generate_proofs(df, image_dict, coi1=COI_1_name, coi2=COI_2_name):
     logger.info('Generating proof plots...')
     for name, img in image_dict.items():
         contour = df.loc[df['image_name']==name, 'cell_coords']
+        coord_list = df.loc[df['image_name']==name, 'puncta_coords']
+
         if contour.empty:
             continue
 
@@ -233,6 +235,11 @@ def generate_proofs(df, image_dict, coi1=COI_1_name, coi2=COI_2_name):
         ax2.imshow(cell_img, cmap='gray_r')
         for line in contour.iloc[0]:
             ax2.plot(line[:,1], line[:,0], c='k', lw=0.5)
+
+        if len(coord_list) > 1:
+            for puncta in coord_list:
+                if isinstance(puncta, np.ndarray):
+                    ax2.plot(puncta[:,1], puncta[:,0], lw=0.5)
 
         scalebar = ScaleBar(SCALE_PX, SCALE_UNIT, location='lower right',
                             pad=0.3, sep=2, box_alpha=0, color='gray',
@@ -270,8 +277,8 @@ if __name__ == '__main__':
             'coi2_partition_coeff', 'coi1_partition_coeff',
             'cell_cv', 'cell_skew']
     
-    # remove outliers based on z-score
-    features = features[(np.abs(stats.zscore(features[cols[:-1]])) < 3).all(axis=1)]
+    # # remove outliers based on z-score
+    # features = features[(np.abs(stats.zscore(features[cols[:-1]])) < 3).all(axis=1)]
 
     # save the main features dataframe
     features.to_csv(f'{output_folder}puncta_features.csv', index=False)
