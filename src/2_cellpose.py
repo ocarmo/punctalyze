@@ -97,7 +97,7 @@ def visualise_cell_pose(images, masks, flows, big_images=False):
     """
     for idx, image in enumerate(images):
         fig, ax = plt.subplots(1, 4, figsize=(12, 4))
-        ax[0].imshow(image[0], cmap='gray')
+        ax[0].imshow(image[0], cmap='gray_r')
         ax[0].set_title("original")
 
         # plot flow fields
