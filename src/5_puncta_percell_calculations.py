@@ -9,7 +9,7 @@ import sys
 from loguru import logger
 
 # special import, path to script
-puncta_ana_path = 'src/4_puncta_detection.py'
+puncta_ana_path = 'punctalyze/src/4_puncta_detection.py'
 
 # load the module dynamically due to annoying file name
 spec = importlib.util.spec_from_file_location('puncta_detection', puncta_ana_path)
@@ -34,6 +34,7 @@ def calculate_cell_features(df):
     agg_df = df.groupby(group_cols).agg({
         'puncta_minor_axis_length': 'mean',
         'puncta_major_axis_length': 'mean',
+        'puncta_aspect_ratio': 'mean',
         'puncta_area': ['mean', 'sum', 'count'],
         'cell_size': 'mean',
         'puncta_eccentricity': 'mean',
@@ -41,6 +42,7 @@ def calculate_cell_features(df):
         'puncta_skew': 'mean',
         'coi2_partition_coeff': 'mean',
         'coi1_partition_coeff': 'mean',
+        'cell_std': 'mean',
         'cell_cv': 'mean',
         'cell_skew': 'mean',
         'cell_coi1_intensity_mean': 'mean',
@@ -59,6 +61,7 @@ def calculate_cell_features(df):
     agg_df = agg_df.rename(columns={
         'puncta_minor_axis_length_mean': 'puncta_mean_minor_axis',
         'puncta_major_axis_length_mean': 'puncta_mean_major_axis',
+        'puncta_aspect_ratio_mean': 'puncta_mean_aspect_ratio',
         'puncta_area_mean': 'mean_puncta_area',
         'puncta_area_count': 'puncta_count',
         'puncta_eccentricity_mean': 'avg_eccentricity',
@@ -66,6 +69,7 @@ def calculate_cell_features(df):
         'puncta_skew_mean': 'puncta_skew_mean',
         'coi2_partition_coeff_mean': 'coi2_partition_coeff',
         'coi1_partition_coeff_mean': 'coi1_partition_coeff',
+        'cell_std_mean': 'cell_std',
         'cell_cv_mean': 'cell_cv',
         'cell_skew_mean': 'cell_skew',
         'cell_coi1_intensity_mean_mean': 'cell_coi1_intensity_mean',
@@ -104,20 +108,20 @@ if __name__ == '__main__':
     summary = calculate_cell_features(feature_information)
 
     # Add metadata columns
-    summary['tag'] = summary['image_name'].str.split('-').str[0].str.split('_').str[-1]
-    summary['condition'] = summary['image_name'].str.split('_').str[2].str.split('-').str[0]
-    summary['rep'] = summary['image_name'].str.split('_').str[-1].str.split('-').str[0]
+    summary['tag'] = ['EYFP' for name in summary['image_name']]
+    summary['condition'] = summary['image_name'].str.split('-').str[0]
+    summary['rep'] = summary['image_name'].str.split('-').str[-2]
 
     # Define features of interest (excluding metadata columns)
     cols = summary.columns.tolist()
     cols = [item for item in cols if '_coords' not in item]
     cols = ['cell_size', 'mean_puncta_area', 'puncta_area_proportion', 'puncta_count',
-        'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'avg_eccentricity',
-        'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff',
+        'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'puncta_mean_aspect_ratio','avg_eccentricity',
+        'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
         'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean', 'puncta_intensity_mean']
 
-    # remove outliers based on z-score
-    summary = summary[(np.abs(stats.zscore(summary[cols[:-1]])) < 3).all(axis=1)]
+    # # remove outliers based on z-score # this removes all data points for some reason
+    # summary = summary[(np.abs(stats.zscore(summary[cols[:-1]])) < 3).all(axis=1)]
 
     # Save dataframes (raw, averaged, normalized, normalized averaged)
     save_dataframes(summary, cols)
