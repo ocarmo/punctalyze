@@ -18,7 +18,7 @@ from scipy.stats import skewtest
 from loguru import logger
 import functools
 # special import, path to script
-napari_utils_path = 'src/3_napari.py' # adjust as needed
+napari_utils_path = 'punctalyze/src/3_napari.py' # adjust as needed
 
 # load the module dynamically due to annoying file name
 spec = importlib.util.spec_from_file_location("napari", napari_utils_path)
@@ -38,10 +38,10 @@ STD_THRESHOLD = 3.8
 SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
 COI_1 = 1  # channel of interest for saturation check (e.g., 1 for channel 2)
 COI_2 = 0  # secondary channel of interest for comparisons
-COI_1_name = 'coi1'  # name of the first channel of interest, for plotting
-COI_2_name  = 'coi2'  # name of the second channel of interest, flor plotting
-MIN_PUNCTA_SIZE = 16  # minimum size of puncta
-SCALE_PX = 0.0779907  # size of one pixel in units specified by the next constant
+COI_1_name = 'TDP43-YFP'  # name of the first channel of interest, for plotting
+COI_2_name  = 'DAPI'  # name of the second channel of interest, for plotting
+MIN_PUNCTA_SIZE = 4  # minimum size of puncta
+SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
 mask_folder = 'results/napari_masking/'
@@ -116,7 +116,7 @@ def filter_saturated_images(images, cytoplasm_masks, masks):
         stack = np.stack([
             img[COI_2], img[COI_1], cytoplasm_masks[name]
         ])
-        # apply  imported saturation check function
+        # apply imported saturation check function
         cells = remove_saturated_cells(
             image_stack=stack,
             mask_stack=masks[name],
@@ -142,32 +142,41 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
             mean_coi1 = coi1_vals.mean()
             std_coi1 = coi1_vals.std()
 
-            threshold = std_coi1 * STD_THRESHOLD
+            threshold = (std_coi1 * STD_THRESHOLD) + mean_coi1
             binary = (coi1 > threshold) & cell_mask
             puncta_labels = morphology.label(binary)
             puncta_labels = remove_small_objects(puncta_labels, min_size=MIN_PUNCTA_SIZE)
 
             df_p = feature_extractor(puncta_labels).add_prefix('puncta_')
+            
+            # define column names for the extra stats
+            stats_columns = [
+                'puncta_cv',
+                'puncta_skew',
+                'puncta_intensity_mean',
+                'puncta_intensity_mean_in_coi2'
+            ]
+
             if df_p.empty:
-                df_p.loc[0] = 0
+                # create a single-row df filled with 0s, same columns
+                df_stats = pd.DataFrame([[np.nan] * len(stats_columns)], columns=stats_columns)
+            else:
+                stats_list = []
+                for i, row in df_p.iterrows():
+                    p_mask = puncta_labels == row['puncta_label']
+                    puncta_vals = coi1[p_mask]
+                    cv = puncta_vals.std() / puncta_vals.mean() if puncta_vals.mean() != 0 else np.nan
+                    skew_stat = skewtest(puncta_vals).statistic if len(puncta_vals) >= 8 else np.nan
+                    mean_p = puncta_vals.mean()
+                    mean_coi2 = coi2[p_mask].mean()
+                    stats_list.append((cv, skew_stat, mean_p, mean_coi2))
 
-            stats_list = []
-            for i, row in df_p.iterrows():
-                p_mask = puncta_labels == row['puncta_label']
-                puncta_vals = coi1[p_mask]
-                cv = puncta_vals.std() / puncta_vals.mean()
-                skew_stat = skewtest(puncta_vals).statistic
-                mean_p = puncta_vals.mean()
-                mean_coi2 = coi2[p_mask].mean()
-                stats_list.append((cv, skew_stat, mean_p, mean_coi2))
-
-            df_stats = pd.DataFrame(stats_list,
-                                    columns=['puncta_cv', 'puncta_skew',
-                                             'puncta_intensity_mean',
-                                             'puncta_intensity_mean_in_coi2'])
+                df_stats = pd.DataFrame(stats_list, columns=stats_columns)
+            
             df = pd.concat([df_p.reset_index(drop=True), df_stats], axis=1)
             df['image_name'], df['cell_number'] = name, lbl
             df['cell_size'] = cell_mask.sum()
+            df['cell_std'] = std_coi1
             df['cell_cv'] = std_coi1 / mean_coi1  # coefficient of variation
             df['cell_skew'] = skewtest(coi1_vals).statistic
             df['cell_coi1_intensity_mean'] = mean_coi1
@@ -259,28 +268,42 @@ if __name__ == '__main__':
     images = load_images(image_folder)
     masks = load_masks(mask_folder)
 
-    cyto_masks = generate_cytoplasm_masks(masks)
-    filtered = filter_saturated_images(images, cyto_masks, masks)
+    # # -- generate and filter cytoplasm masks ---
+    # cyto_masks = generate_cytoplasm_masks(masks)
+    # filtered = filter_saturated_images(images, cyto_masks, masks)
+
+    # -- OR collect and filter cell masks ---
+    cell_masks = {name: mask[0] for name, mask in masks.items()}
+    filtered = filter_saturated_images(images, cell_masks, masks)
+
+    # --- feature extraction ---
     features = collect_features(filtered)
     features = extra_puncta_features(features)
 
-    # --- data wrangling and saving ---
+    # --- generate proofs ---
+    generate_proofs(features, filtered, coi1=COI_1, coi2=COI_2)
+    logger.info('proofs complete.')
+
+    # --- data wrangling ---
     logger.info('starting data wrangling and saving...')
-    features['tag'] = features['image_name'].str.split('-').str[0].str.split('_').str[-1]
-    features['condition'] = features['image_name'].str.split('_').str[2].str.split('-').str[0]
-    features['rep'] = features['image_name'].str.split('_').str[-1].str.split('-').str[0]
+    features['tag'] = ['EYFP' for name in features['image_name']]
+    features['condition'] = features['image_name'].str.split('-').str[0]
+    features['rep'] = features['image_name'].str.split('-').str[-2]
 
     cols = features.columns.tolist()
     cols = [item for item in cols if '_coords' not in item]
     cols = ['puncta_area', 'puncta_eccentricity', 'puncta_aspect_ratio',
             'puncta_circularity', 'puncta_cv', 'puncta_skew',
-            'coi2_partition_coeff', 'coi1_partition_coeff',
+            'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
             'cell_cv', 'cell_skew']
     
     # # remove outliers based on z-score
     # features = features[(np.abs(stats.zscore(features[cols[:-1]])) < 3).all(axis=1)]
 
-    # save the main features dataframe
+    # --- data trimming and saving ---
+    # trim off coordinates used for proofs, save the main features dataframe
+    cols_to_drop = [col for col in features.columns if '_coords' in col]
+    features = features.drop(columns=cols_to_drop)
     features.to_csv(f'{output_folder}puncta_features.csv', index=False)
 
     # save averages per biological replicate
@@ -298,8 +321,4 @@ if __name__ == '__main__':
     rep_norm_df.to_csv(f'{output_folder}puncta_features_normalized_reps.csv', index=False)
 
     logger.info('data wrangling and saving complete.')
-
-    # --- generate proofs ---
-    generate_proofs(features, filtered, coi1=COI_1, coi2=COI_2)
-
     logger.info('pipeline complete.')
