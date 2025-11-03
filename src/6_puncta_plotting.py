@@ -33,63 +33,62 @@ def load_summary_data(input_folder):
 
 # --- Plotting Functions ---
 def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hue='tag', pairs=None, order=None):
-    fig, axes = plt.subplots(nrows=5, ncols=3, figsize=(15, 15))
+    fig, axes = plt.subplots(nrows=6, ncols=3, figsize=(20, 30))
     axes = axes.flatten()
 
-    for i, feature in enumerate(features):
-        ax = axes[i]
-        sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
-                      linewidth=1, size=8, alpha=0.4, hue=hue, order=order, ax=ax)
-        sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
-                      linewidth=1, size=8, hue=hue, order=order, ax=ax)
-        sns.boxplot(data=data_agg, x=x, y=feature, palette=['.9'], hue=hue,
-                    order=order, ax=ax)
+    if hue is None:
+        for i, feature in enumerate(features):
+            ax = axes[i]
+            sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
+                        linewidth=1, size=8, alpha=0.1, order=order, ax=ax, zorder=0)
+            sns.violinplot(data=data_agg, x=x, y=feature, order=order, color='gray', ax=ax, zorder=1)
+            sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
+                        linewidth=1, size=8, order=order, ax=ax, zorder=2)
+            sns.despine()
 
-        ax.legend_.remove()
-        sns.despine()
+            if pairs:
+                annotator = Annotator(ax, pairs, data=data_agg, x=x, y=feature, order=order)
+                annotator.configure(test='t-test_ind', verbose=0)
+                annotator.apply_test()
+                annotator.annotate()
+        
+        for ax in axes[len(features):]:
+            ax.axis('off')
 
-        if pairs:
-            annotator = Annotator(ax, pairs, data=data_agg, x=x, y=feature, hue=hue, order=order)
-            annotator.configure(test='Mann-Whitney', verbose=0)
-            annotator.apply_test()
-            annotator.annotate()
+        fig.suptitle(title, fontsize=18, y=0.99)
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
+        plt.close(fig)
 
-    for ax in axes[len(features):]:
-        ax.axis('off')
 
-    fig.suptitle(title, fontsize=18, y=0.99)
-    handles, labels = ax.get_legend_handles_labels()
-    fig.tight_layout()
-    fig.legend(handles, labels, bbox_to_anchor=(1.1, 1), title=hue)
-    fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
-    plt.close(fig)
+    else:   
+        for i, feature in enumerate(features):
+            ax = axes[i]
+            sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
+                        linewidth=1, size=8, alpha=0.4, hue=hue, order=order, ax=ax)
+            sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
+                        linewidth=1, size=8, hue=hue, order=order, ax=ax)
+            sns.boxplot(data=data_agg, x=x, y=feature, palette=['.9'], hue=hue,
+                        order=order, ax=ax)
 
-# TODO how to make more dynamic so we can plot without hue?
-def plot_no_stats(data_raw, data_agg, features, title, save_name, x='tag', hue='condition', order=None, palette=None):
-    fig, axes = plt.subplots(nrows=5, ncols=3, figsize=(15, 15))
-    axes = axes.flatten()
+            ax.legend_.remove()
+            sns.despine()
 
-    for i, feature in enumerate(features):
-        ax = axes[i]
-        sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
-                      linewidth=1, size=8, hue=hue, palette=palette, hue_order=order, zorder=2, ax=ax)
-        sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
-                      linewidth=1, size=8, alpha=0.4, hue=hue, palette=palette, hue_order=order, zorder=1, ax=ax)
-        sns.boxplot(data=data_agg, x=x, y=feature, palette=['.9'],
-                    hue=hue, hue_order=order, zorder=0, ax=ax)
+            if pairs:
+                annotator = Annotator(ax, pairs, data=data_agg, x=x, y=feature, hue=hue, order=order)
+                annotator.configure(test='Mann-Whitney', verbose=0)
+                annotator.apply_test()
+                annotator.annotate()
 
-        ax.legend_.remove()
-        sns.despine()
+        for ax in axes[len(features):]:
+            ax.axis('off')
 
-    for ax in axes[len(features):]:
-        ax.axis('off')
-
-    fig.suptitle(title, fontsize=18, y=0.99)
-    handles, labels = ax.get_legend_handles_labels()
-    fig.tight_layout()
-    fig.legend(handles, labels, bbox_to_anchor=(1.1, 1), title=hue)
-    fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
-    plt.close(fig)
+        fig.suptitle(title, fontsize=18, y=0.99)
+        handles, labels = ax.get_legend_handles_labels()
+        fig.tight_layout()
+        fig.legend(handles, labels, bbox_to_anchor=(1.1, 1), title=hue)
+        fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
+        plt.close(fig)
 
 # TODO find all instances of g3bp/rhm1 and make dynamic
 def plot_partition_coefficients(data_raw, data_agg, save_name, x='tag', hue='condition', order=None):
@@ -130,46 +129,38 @@ if __name__ == '__main__':
 
     puncta_features = ['puncta_area', 'puncta_eccentricity', 'puncta_aspect_ratio',
                 'puncta_circularity', 'puncta_cv', 'puncta_skew',
-                'coi2_partition_coeff', 'coi1_partition_coeff',
+                'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
                 'cell_cv', 'cell_skew']
 
     percell_features = ['cell_size', 'mean_puncta_area', 'puncta_area_proportion', 'puncta_count',
-            'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'avg_eccentricity',
-            'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff',
+            'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'puncta_mean_aspect_ratio','avg_eccentricity',
+            'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
             'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean']
 
     # could use combinations function to generate pairs dynamically, but here we define them explicitly
-    # paired_conditions = combinations(conditions, 2)
-    conditions = ['PBS', 'NaAsO2', 'HS']
-
-    # TODO generate paired conditions dynamically
-    # TODO generate conditions list dynamically
-    # TODO generate color platte dynamically
-    # TODO make order alphabetical as default
-    paired_conditions = [(('PBS', 'GFP'), ('PBS', 'FLAG')),
-                         (('NaAsO2', 'GFP'), ('NaAsO2', 'FLAG')),
-                         (('HS', 'GFP'), ('HS', 'FLAG'))]
-    order = ['PBS', 'NaAsO2', 'HS']
-    palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
+    conditions = dfs['puncta_features']['condition'].unique().tolist()
+    paired_conditions = combinations(conditions, 2)
+    paired_list = list(paired_conditions)
+    paired_list = [pair for pair in paired_list if 'WT' in pair]  # only compare to WT
+    order = sorted(conditions)
+    # palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
+    palette = sns.color_palette('tab10', n_colors=len(conditions))
 
     # prepare plotting configuration as [(title, features, raw_df, reps_df), (etc...)]
     plotting_configs = [
-        ('per puncta, raw', puncta_features, dfs['puncta_features'], dfs['puncta_features_reps'], 'tag-paired_perpuncta_raw.png'),
-        ('per puncta, normalized', puncta_features, dfs['puncta_features_normalized'], dfs['puncta_features_normalized_reps'], 'tag-paired_perpuncta_normalized.png'),
-        ('per cell, raw', percell_features, dfs['percell'], dfs['percell_reps'], 'tag-paired_percell_raw.png'),
-        ('per cell, normalized', percell_features, dfs['percell_norm'], dfs['percell_norm_reps'], 'tag-paired_percell_normalized.png'),
+        ('per puncta, raw', puncta_features, dfs['puncta_features'], dfs['puncta_features_reps'], 'perpuncta_raw.png'),
+        ('per puncta, normalized', puncta_features, dfs['puncta_features_normalized'], dfs['puncta_features_normalized_reps'], 'perpuncta_normalized.png'),
+        ('per cell, raw', percell_features, dfs['percell'], dfs['percell_reps'], 'percell_raw.png'),
+        ('per cell, normalized', percell_features, dfs['percell_norm'], dfs['percell_norm_reps'], 'percell_normalized.png'),
     ]
 
-    logger.info('Generating paired tag plots with stats...')
+    # TODO make plotting more dynamic to handle stats/no-stats cases
+    logger.info('Generating paired plots with stats...')
     for title, features, raw_df, reps_df, filename in plotting_configs:
+        title
         plot_stats(raw_df, reps_df, features, f'Calculated Parameters - {title}', filename,
-                   x='condition', hue='tag', pairs=paired_conditions, order=order)
+                   x='condition', hue=None, pairs=paired_list, order=order)
 
-    logger.info('Generating paired condition plots (no stats)...')
-    for title, features, raw_df, reps_df, filename in plotting_configs:
-        plot_no_stats(raw_df, reps_df, features, f'Calculated Parameters - {title}',
-                      filename.replace('tag-paired', 'condition-paired'),
-                      x='tag', hue='condition', order=order, palette=palette)
-
+    # TODO fix partition coefficient plots
     logger.info('Generating partition coefficient plots...')
     plot_partition_coefficients(dfs['percell'], dfs['percell_reps'], 'condition-paired_percell_raw_partition-only.png', order=order)
