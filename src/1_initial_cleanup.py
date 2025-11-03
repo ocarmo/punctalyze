@@ -8,13 +8,14 @@ from loguru import logger
 from bioio import BioImage
 from bioio.writers import OmeTiffWriter
 import bioio_ome_tiff
+import bioio_nd2
 
 logger.info('import ok')
 
 # configuration
 input_path = 'raw_data/'
 output_folder = 'results/initial_cleanup/'
-image_extensions = ['.czi', '.tif', '.tiff', '.lif']
+image_extensions = ['.czi', '.tif', '.tiff', '.lif', '.nd2']
 
 
 def image_converter(image_path, output_folder, tiff=False, MIP=False, array=True):
@@ -55,8 +56,8 @@ def image_converter(image_path, output_folder, tiff=False, MIP=False, array=True
     if image_shape['Z'][0] > 1:
         image = bio_image.get_image_data("CZYX", B=0, V=0, T=0)
 
-    # import multichannel single z-slice
-    if (image_shape['T'][0] == 1) & (image_shape['C'][0] > 1):
+    # import multichannel single z-slice single timepoint
+    if (image_shape['Z'][0] == 1) & (image_shape['T'][0] == 1) & (image_shape['C'][0] > 1):
         image = bio_image.get_image_data("CYX", B=0, Z=0, V=0, T=0)
 
     # make more human readable name
@@ -108,6 +109,7 @@ if __name__ == '__main__':
     # --------------- collect image names and convert ---------------
     # collect and convert images to np arrays
     for name in image_names:
-        image_converter(name, output_folder=f'{output_folder}', tiff=False, MIP=False, array=True)
+        name
+        image_converter(name, output_folder=f'{output_folder}', tiff=False, MIP=True, array=False)
 
     logger.info('initial cleanup complete :-)')
