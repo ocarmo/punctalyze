@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import seaborn as sns
+import numpy as np
 import matplotlib.pyplot as plt
 from itertools import combinations
 from statannotations.Annotator import Annotator
@@ -31,31 +32,72 @@ def load_summary_data(input_folder):
         'percell_norm_reps': pd.read_csv(f'{input_folder}percell_puncta_features_normalized_reps.csv')
     }
 
+
 # --- Plotting Functions ---
-def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hue='tag', pairs=None, order=None):
-    fig, axes = plt.subplots(nrows=6, ncols=3, figsize=(20, 30))
+def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hue='tag', pairs=None, order=None, replicate_col='rep', cell_id_col='image_name'):
+    # --- Compute N (replicates) ---
+    if replicate_col in data_agg.columns:
+        N_per_group = data_agg.groupby([x])[replicate_col].nunique()
+    else:
+        # fallback: assume each row in aggregated data is a replicate
+        N_per_group = data_agg.groupby([x]).size()
+
+    # --- Compute n (cells) ---
+    if cell_id_col in data_raw.columns:
+        n_per_group = data_raw.groupby([x]).size()
+
+    # --- Format text ---
+    summary_lines = []
+    for cond in N_per_group.index:
+        N_val = N_per_group.get(cond, np.nan)
+        n_val = n_per_group.get(cond, np.nan)
+        summary_lines.append(f"{cond}: N={N_val}, n={n_val}")
+
+    N_min, N_max = N_per_group.min(), N_per_group.max()
+    n_min, n_max = n_per_group.min(), n_per_group.max()
+
+    summary_text = f"N = {N_min}–{N_max} images\nn = {n_min}–{n_max} cells"
+
+    fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(20, 30))
     axes = axes.flatten()
 
     if hue is None:
         for i, feature in enumerate(features):
             ax = axes[i]
             sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
-                        linewidth=1, size=8, alpha=0.1, order=order, ax=ax, zorder=0)
-            sns.violinplot(data=data_agg, x=x, y=feature, order=order, color='gray', ax=ax, zorder=1)
-            sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
-                        linewidth=1, size=8, order=order, ax=ax, zorder=2)
+                        linewidth=1, size=8, alpha=0.5, order=order, ax=ax, zorder=0)
+            sns.boxplot(data=data_agg, x=x, y=feature, order=order, fill=False, ax=ax, zorder=1)
+            sns.stripplot(data=data_agg, x=x, y=feature, dodge=True,
+                        linewidth=1, size=8, order=order, color='k', ax=ax, zorder=2)
             sns.despine()
+            fig.autofmt_xdate(rotation=45)
 
             if pairs:
                 annotator = Annotator(ax, pairs, data=data_agg, x=x, y=feature, order=order)
                 annotator.configure(test='t-test_ind', verbose=0)
                 annotator.apply_test()
                 annotator.annotate()
-        
-        for ax in axes[len(features):]:
-            ax.axis('off')
 
+        # turn off unused subplots
+        for j in range(len(features), len(axes)):
+            axes[j].set_visible(False)
+
+        # find visible axes
+        visible_axes = [ax for ax in axes if ax.get_visible()]
+        # # bottom row = last 3 visible axes (for 3-column layout)
+        # bottom_axes = visible_axes[-3:]
+        # # hide labels everywhere first
+        # for ax in visible_axes:
+        #     ax.tick_params(axis='x', labelbottom=False)
+       
+        # enable only bottom row
+        for ax in visible_axes:
+            ax.tick_params(axis='x', labelbottom=True)
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+
+        fig.text(1.0, 0.9, summary_text)   # add N/n annotation near legend
         fig.suptitle(title, fontsize=18, y=0.99)
+        plt.xticks(rotation=45, ha='right') 
         fig.tight_layout()
         fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
@@ -83,6 +125,7 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
         for ax in axes[len(features):]:
             ax.axis('off')
 
+        fig.text(1.0, 0.9, summary_text)   # add N/n annotation near legend
         fig.suptitle(title, fontsize=18, y=0.99)
         handles, labels = ax.get_legend_handles_labels()
         fig.tight_layout()
@@ -90,16 +133,16 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
         fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
 
-# TODO find all instances of g3bp/rhm1 and make dynamic
+
 def plot_partition_coefficients(data_raw, data_agg, save_name, x='tag', hue='condition', order=None):
     palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
 
     raw = pd.melt(data_raw, id_vars=['image_name', 'tag', 'condition'],
-                  value_vars=['g3bp_partition_coeff', 'rhm1_partition_coeff'],
+                  value_vars=['coi1_partition_coeff', 'coi2_partition_coeff'],
                   var_name='channel', value_name='partition_coeff')
 
     agg = pd.melt(data_agg, id_vars=['rep', 'tag', 'condition'],
-                  value_vars=['g3bp_partition_coeff', 'rhm1_partition_coeff'],
+                  value_vars=['coi1_partition_coeff', 'coi2_partition_coeff'],
                   var_name='channel', value_name='partition_coeff')
 
     g = sns.FacetGrid(agg, col='channel', height=4.5, aspect=0.8)
@@ -114,7 +157,7 @@ def plot_partition_coefficients(data_raw, data_agg, save_name, x='tag', hue='con
                       edgecolor='white', linewidth=1, alpha=0.4, hue=hue,
                       palette=palette, hue_order=order, zorder=1, size=8, ax=ax)
         ax.get_legend().remove()
-        ax.set_xticklabels(['FLAG-RHM1', 'GFP-RHM1'])
+        ax.set_xticklabels(['COI1', 'COI2'])
         ax.set_xlabel('')
 
     g.set_titles(col_template='{col_name}')
