@@ -13,7 +13,7 @@ import bioio_nd2
 logger.info('import ok')
 
 # configuration
-input_path = 'raw_data/'
+input_path = 'M:/Olivia/2026-02-13'
 output_folder = 'results/initial_cleanup/'
 image_extensions = ['.czi', '.tif', '.tiff', '.lif', '.nd2']
 
@@ -63,6 +63,8 @@ def image_converter(image_path, output_folder, tiff=False, MIP=False, array=True
     # make more human readable name
     short_name = os.path.basename(image_path)
     short_name = short_name.split('.')[0]  # remove file extension
+    # short_name = name.split('\\')[1].replace('/', '_') # keep experiment name
+    # short_name = short_name.split('.')[0]  # remove file extension
 
     if tiff == True:
         # save image as tiff file
@@ -89,7 +91,7 @@ if __name__ == '__main__':
         experiments = ['240509-Processed']
         # if you want all images from all subdirectories in file path, set experiments to 'walk_list'
         walk_list = [x[0] for x in os.walk(input_path)]
-        walk_list = [item for item in walk_list if any(x in item for x in experiments)]
+        walk_list = [item for item in walk_list if any(x in item for x in walk_list)]
 
         # read in all image file names
         file_list = [[f'{root}/{filename}' for filename in files]
@@ -110,6 +112,6 @@ if __name__ == '__main__':
     # collect and convert images to np arrays
     for name in image_names:
         name
-        image_converter(name, output_folder=f'{output_folder}', tiff=False, MIP=True, array=False)
+        image_converter(name, output_folder=f'{output_folder}', tiff=False, array=True)
 
     logger.info('initial cleanup complete :-)')

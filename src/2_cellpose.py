@@ -133,7 +133,7 @@ if __name__ == '__main__':
     # Cellpose-SAM will use the first 3 channels of your image, truncating the rest. It has been trained with the cytoplasm and nuclear channels in any order, with the other channel set to zero.
     # you can combine two stains to create your "cytoplasm" channel
     # in this example indices 0 and 1 (1st and 2nd) have two cellular stains, and nuclei are in index 2 (3rd channel)
-    imgs_cp = [np.stack((img[[0,1]].sum(axis=0), img[2]), axis=0) for name, img in images_dict.items()]
+    imgs_cp = [np.stack((img[1], img[3]), axis=0) for name, img in images_dict.items()]
 
     # other packages to preprocess images and improve segmentation if needed
     # gaussian_blur = [filters.gaussian(image, sigma=1, multichannel=True) for image in imgs_cp]

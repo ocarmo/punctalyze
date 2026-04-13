@@ -17,11 +17,11 @@ image_folder = 'results/initial_cleanup/'
 mask_folder = 'results/cellpose_masking/'
 output_folder = 'results/napari_masking/'
 mask_filename = 'cellpose_cellmasks.npy'
-SATURATION_THRESHOLD = 60000
-SATURATION_FRAC_CUTOFF = 0.05
-NUCLEUS_AREA_THRESHOLD = 8000
-BORDER_BUFFER_SIZE = 10
-COI = 1 # channel of interest for saturation check (e.g., 1 for channel 2)
+SATURATION_THRESHOLD = (2**16) - 1  # assuming 16-bit images
+SATURATION_FRAC_CUTOFF = 0.05 # fraction of pixels in a cell that can be saturated before we discard it
+NUCLEUS_AREA_THRESHOLD = 20*2  # minimum area for a nucleus, adjust based on expected size of nuclei in your images
+BORDER_BUFFER_SIZE = 10  # number of pixels from the border to consider as "border", adjust based on image size
+COI = 2 # channel of interest for saturation check (e.g., 1 for channel 2)
 FLUORO_INTENSITY_THRESHOLD = 200  # threshold for significant fluorescence intensity in COI
 FLUORO_FRACTION_CUTOFF = 0.1  # fraction of pixels in a cell that must be above the threshold to keep it
 
