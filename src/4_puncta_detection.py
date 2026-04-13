@@ -34,13 +34,13 @@ plt.rcParams.update({'font.size': 14})
 sns.set_palette('Paired')
 
 # --- configuration ---
-STD_THRESHOLD = 3.8
-SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
-COI_1 = 1  # channel of interest for saturation check (e.g., 1 for channel 2)
+STD_THRESHOLD = 2  # number of standard deviations above the mean to set as threshold for puncta detection, adjust based on expected signal-to-noise in your images
+SAT_FRAC_CUTOFF = 0.05  # for consistency with remove_saturated_cells
+COI_1 = 2  # channel of interest for saturation check (e.g., 1 for channel 2)
 COI_2 = 0  # secondary channel of interest for comparisons
-COI_1_name = 'TDP43-YFP'  # name of the first channel of interest, for plotting
-COI_2_name  = 'DAPI'  # name of the second channel of interest, for plotting
-MIN_PUNCTA_SIZE = 4  # minimum size of puncta
+COI_1_name = 'brG_lariat'  # name of the first channel of interest, for plotting
+COI_2_name  = 'oligo_dT'  # name of the second channel of interest, for plotting
+MIN_PUNCTA_SIZE = 6**2  # minimum size of puncta
 SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
@@ -104,26 +104,26 @@ def generate_cytoplasm_masks(masks):
             single_cyto.append(np.zeros_like(cell_mask, dtype=int))
 
         cyto_masks[name] = sum(single_cyto)
-    logger.info('cytoplasm masks created.')
+    logger.info('cytoplasm masks created')
     return cyto_masks
 
 
-def filter_saturated_images(images, cytoplasm_masks, masks):
+def filter_saturated_images(images, cell_masks):
     logger.info('filtering saturated cells...')
     filtered = {}
     for name, img in images.items():
-        # Build a stack: [stain, coi, cytoplasm mask]
-        stack = np.stack([
-            img[COI_2], img[COI_1], cytoplasm_masks[name]
-        ])
+        # wrangle masks to match the expected input for the saturation check function
+        masks_arr = cell_masks[name]
+        masks_arr = np.expand_dims(masks_arr, axis=0)  # add channel dimension
+
         # apply imported saturation check function
         cells = remove_saturated_cells(
-            image_stack=stack,
-            mask_stack=masks[name],
+            image_stack=img,
+            mask_stack=masks_arr,
             COI=COI_1
         )
-        filtered[name] = np.stack([stack[COI_2], stack[COI_1], cells])
-    logger.info('saturated cells filtered.')
+        filtered[name] = np.stack([img[COI_2], img[COI_1], cells])
+    logger.info('saturated cells filtered')
     return filtered
 
 
@@ -185,7 +185,7 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
 
             results.append(df)
 
-    logger.info('feature extraction done.')
+    logger.info('feature extraction done')
     return pd.concat(results, ignore_index=True)
 
 
@@ -254,8 +254,8 @@ def generate_proofs(df, image_dict, coi1=COI_1_name, coi2=COI_2_name):
                             pad=0.3, sep=2, box_alpha=0, color='gray',
                             length_fraction=0.3)
         ax1.add_artist(scalebar)
-        ax1.text(50, 2000, COI_1_name, color='gray')
-        ax1.text(50, 1800, COI_2_name, color='steelblue')
+        ax1.text(50, 500, COI_1_name, color='gray')
+        ax1.text(50, 550, COI_2_name, color='steelblue')
         fig.suptitle(name, y=0.88)
         fig.tight_layout()
         fig.savefig(f'{proofs_folder}{name}_proof.png', dpi=300, bbox_inches='tight')
@@ -286,9 +286,9 @@ if __name__ == '__main__':
 
     # --- data wrangling ---
     logger.info('starting data wrangling and saving...')
-    features['tag'] = ['EYFP' for name in features['image_name']]
-    features['condition'] = features['image_name'].str.split('-').str[0]
-    features['rep'] = features['image_name'].str.split('-').str[-2]
+    features['strain'] = features['image_name'].str.split('_').str[0]
+    features['condition'] = features['image_name'].str.split('_').str[-1].str.split('-').str[0]
+    features['probes'] = features['image_name'].str.split('_').str[1]
 
     cols = features.columns.tolist()
     cols = [item for item in cols if '_coords' not in item]
@@ -307,7 +307,7 @@ if __name__ == '__main__':
     features.to_csv(f'{output_folder}puncta_features.csv', index=False)
 
     # save averages per biological replicate
-    rep_df = aggregate_features_by_group(features, ['condition', 'tag', 'rep'], cols)
+    rep_df = aggregate_features_by_group(features, ['condition', 'strain', 'probes'], cols)
     rep_df.to_csv(f'{output_folder}puncta_features_reps.csv', index=False)
 
     # save features normalized to cell intensity of channel of interest
@@ -317,7 +317,7 @@ if __name__ == '__main__':
     df_norm.to_csv(f'{output_folder}puncta_features_normalized.csv', index=False)
 
     # save normalized averages per biological replicate
-    rep_norm_df = aggregate_features_by_group(df_norm, ['condition', 'tag', 'rep'], cols)
+    rep_norm_df = aggregate_features_by_group(df_norm, ['condition', 'strain', 'probes'], cols)
     rep_norm_df.to_csv(f'{output_folder}puncta_features_normalized_reps.csv', index=False)
 
     logger.info('data wrangling and saving complete.')
