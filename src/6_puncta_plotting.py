@@ -32,16 +32,41 @@ def load_summary_data(input_folder):
     }
 
 # --- Plotting Functions ---
-def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hue='tag', pairs=None, order=None):
-    fig, axes = plt.subplots(nrows=6, ncols=3, figsize=(20, 30))
+def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hue='tag', pairs=None, order=None, replicate_col='rep', cell_id_col=None):
+    # --- Compute N (replicates) ---
+    if replicate_col in data_agg.columns:
+        N_per_group = data_agg.groupby([x, hue])[replicate_col].nunique()
+    else:
+        # fallback: assume each row in aggregated data is a replicate
+        N_per_group = data_agg.groupby([x, hue]).size()
+
+    # --- Compute n (cells) ---
+    if cell_id_col and cell_id_col in data_raw.columns:
+        n_per_group = data_raw.groupby([x, hue])[cell_id_col].nunique()
+    else:
+        # fallback: assume each row is a cell
+        n_per_group = data_raw.groupby([x, hue]).size()
+
+    # --- Format text ---
+    summary_lines = []
+    for cond in N_per_group.index:
+        N_val = N_per_group.get(cond, np.nan)
+        n_val = n_per_group.get(cond, np.nan)
+        summary_lines.append(f"{cond}: N={N_val}, n={n_val}")
+
+    N_min, N_max = N_per_group.min(), N_per_group.max()
+    n_min, n_max = n_per_group.min(), n_per_group.max()
+
+    summary_text = f"N = {N_min}–{N_max} replicates\nn = {n_min}–{n_max} cells"
+    fig, axes = plt.subplots(nrows=int(round((len(features)/3), 1))+1, ncols=3, figsize=(20, 30))
     axes = axes.flatten()
 
     if hue is None:
         for i, feature in enumerate(features):
             ax = axes[i]
             sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
-                        linewidth=1, size=8, alpha=0.1, order=order, ax=ax, zorder=0)
-            sns.violinplot(data=data_agg, x=x, y=feature, order=order, color='gray', ax=ax, zorder=1)
+                        linewidth=1, size=8, alpha=0.1, order=order, ax=ax, zorder=1)
+            sns.violinplot(data=data_agg, x=x, y=feature, order=order, color='gray', ax=ax, zorder=0)
             sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
                         linewidth=1, size=8, order=order, ax=ax, zorder=2)
             sns.despine()
@@ -65,62 +90,43 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
         for i, feature in enumerate(features):
             ax = axes[i]
             sns.stripplot(data=data_raw, x=x, y=feature, dodge=True, edgecolor='white',
-                        linewidth=1, size=8, alpha=0.4, hue=hue, order=order, ax=ax)
+                        linewidth=1, size=8, alpha=0.4, hue=hue, hue_order=hue_order, order=order, ax=ax)
+            # store legend handles and labels for later plotting
+            handles, labels = ax.get_legend_handles_labels()
+
+            sns.violinplot(data=data_raw, x=x, y=feature, palette=['.9'],   hue=hue, hue_order=hue_order, order=order, ax=ax)
             sns.stripplot(data=data_agg, x=x, y=feature, dodge=True, edgecolor='k',
-                        linewidth=1, size=8, hue=hue, order=order, ax=ax)
-            sns.boxplot(data=data_agg, x=x, y=feature, palette=['.9'], hue=hue,
-                        order=order, ax=ax)
+                        linewidth=1, size=8, hue=hue, hue_order=hue_order, order=order, ax=ax)
 
             ax.legend_.remove()
             sns.despine()
 
             if pairs:
-                annotator = Annotator(ax, pairs, data=data_agg, x=x, y=feature, hue=hue, order=order)
+                annotator = Annotator(ax, pairs, data=data_agg, x=x, y=feature, hue=hue, hue_order=hue_order, order=order)
                 annotator.configure(test='Mann-Whitney', verbose=0)
                 annotator.apply_test()
                 annotator.annotate()
+
+            # label_map = {
+            #     'y47': 'Pab1',
+            #     'y48': 'Gbp2',
+            #     'y49': 'Hsp104',
+            #     'y50': 'Pbp1',
+            #     'y51': 'Yef3',
+            #     'y52': 'Gapdh'
+            # }
+            # ax.set_xticklabels([label_map.get(t.get_text(), t.get_text()) 
+            #             for t in ax.get_xticklabels()])
 
         for ax in axes[len(features):]:
             ax.axis('off')
 
         fig.suptitle(title, fontsize=18, y=0.99)
-        handles, labels = ax.get_legend_handles_labels()
         fig.tight_layout()
         fig.legend(handles, labels, bbox_to_anchor=(1.1, 1), title=hue)
+        fig.text(1.0, 0.9, summary_text)   # add N/n annotation near legend
         fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
-
-# TODO find all instances of g3bp/rhm1 and make dynamic
-def plot_partition_coefficients(data_raw, data_agg, save_name, x='tag', hue='condition', order=None):
-    palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
-
-    raw = pd.melt(data_raw, id_vars=['image_name', 'tag', 'condition'],
-                  value_vars=['g3bp_partition_coeff', 'rhm1_partition_coeff'],
-                  var_name='channel', value_name='partition_coeff')
-
-    agg = pd.melt(data_agg, id_vars=['rep', 'tag', 'condition'],
-                  value_vars=['g3bp_partition_coeff', 'rhm1_partition_coeff'],
-                  var_name='channel', value_name='partition_coeff')
-
-    g = sns.FacetGrid(agg, col='channel', height=4.5, aspect=0.8)
-    g.map_dataframe(sns.boxplot, x=x, y='partition_coeff', palette=['.9'], hue=hue, hue_order=order, zorder=0)
-    g.map_dataframe(sns.stripplot, x=x, y='partition_coeff', dodge=True, edgecolor='k',
-                    linewidth=1, hue=hue, palette=palette, hue_order=order, zorder=2, size=8)
-
-    for ax_i, category in enumerate(g.col_names):
-        ax = g.axes.flat[ax_i]
-        subset = raw[raw['channel'] == category]
-        sns.stripplot(data=subset, x=x, y='partition_coeff', dodge=True,
-                      edgecolor='white', linewidth=1, alpha=0.4, hue=hue,
-                      palette=palette, hue_order=order, zorder=1, size=8, ax=ax)
-        ax.get_legend().remove()
-        ax.set_xticklabels(['FLAG-RHM1', 'GFP-RHM1'])
-        ax.set_xlabel('')
-
-    g.set_titles(col_template='{col_name}')
-    g.tight_layout()
-    g.fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
-    plt.close(g.fig)
 
 
 if __name__ == '__main__':
@@ -128,14 +134,12 @@ if __name__ == '__main__':
     dfs = load_summary_data(input_folder)
 
     puncta_features = ['puncta_area', 'puncta_eccentricity', 'puncta_aspect_ratio',
-                'puncta_circularity', 'puncta_cv', 'puncta_skew',
-                'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
-                'cell_cv', 'cell_skew']
+                'puncta_circularity', 'puncta_cv', 'puncta_skew']
 
     percell_features = ['cell_size', 'mean_puncta_area', 'puncta_area_proportion', 'puncta_count',
-            'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'puncta_mean_aspect_ratio','avg_eccentricity',
-            'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
-            'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean']
+            'puncta_mean_aspect_ratio','avg_eccentricity',
+            'puncta_cv_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
+            'cell_cv', 'cell_coi1_intensity_mean']
 
     # could use combinations function to generate pairs dynamically, but here we define them explicitly
     conditions = dfs['puncta_features']['condition'].unique().tolist()
@@ -145,6 +149,10 @@ if __name__ == '__main__':
     order = sorted(conditions)
     # palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
     palette = sns.color_palette('tab10', n_colors=len(conditions))
+
+    # per dataframe, remove rows if '23-19' or '23-22' in image name (these had very poor binding)
+    for key in dfs.keys():
+        dfs[key] = dfs[key][~dfs[key]['probes'].str.contains('23-19|23-22')]
 
     # prepare plotting configuration as [(title, features, raw_df, reps_df), (etc...)]
     plotting_configs = [
@@ -158,9 +166,12 @@ if __name__ == '__main__':
     logger.info('Generating paired plots with stats...')
     for title, features, raw_df, reps_df, filename in plotting_configs:
         title
+        for probe in raw_df['probes'].unique():
+            raw_subset = raw_df[raw_df['probes'] == probe]
+            reps_subset = reps_df[reps_df['probes'] == probe]
+            plot_stats(raw_subset, reps_subset, features, f'{title} - {probe}', f'{filename.split(".")[0]}_{probe}.png',
+                       x='condition', hue='strain', hue_order=['wt-brG', 'dbr1-brG'], pairs=None, style='probes', order=order)
+        # all probes
         plot_stats(raw_df, reps_df, features, f'Calculated Parameters - {title}', filename,
-                   x='condition', hue=None, pairs=paired_list, order=order)
+                   x='condition', hue='strain', pairs=None, order=order)
 
-    # TODO fix partition coefficient plots
-    logger.info('Generating partition coefficient plots...')
-    plot_partition_coefficients(dfs['percell'], dfs['percell_reps'], 'condition-paired_percell_raw_partition-only.png', order=order)
