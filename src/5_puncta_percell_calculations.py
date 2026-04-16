@@ -80,7 +80,7 @@ def calculate_cell_features(df):
     return agg_df
 
 
-def save_dataframes(df, features, group_cols=['condition', 'tag', 'rep']):
+def save_dataframes(df, features, group_cols=['condition', 'strain', 'rep']):
     # Save raw summary per cell
     df.to_csv(f'{output_folder}percell_puncta_features.csv', index=False)
 
@@ -108,9 +108,10 @@ if __name__ == '__main__':
     summary = calculate_cell_features(feature_information)
 
     # Add metadata columns
-    summary['tag'] = ['EYFP' for name in summary['image_name']]
-    summary['condition'] = summary['image_name'].str.split('-').str[0]
-    summary['rep'] = summary['image_name'].str.split('-').str[-2]
+    summary['strain'] = summary['image_name'].str.split('_').str[1]
+    summary['construct'] = summary['image_name'].str.split('_').str[2]
+    summary['condition'] = summary['image_name'].str.split('_').str[3].str.split('-').str[0]
+    summary['rep'] = summary['image_name'].str.split('_').str[0]
 
     # Define features of interest (excluding metadata columns)
     cols = summary.columns.tolist()
@@ -120,10 +121,7 @@ if __name__ == '__main__':
         'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
         'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean', 'puncta_intensity_mean']
 
-    # # remove outliers based on z-score # this removes all data points for some reason
-    # summary = summary[(np.abs(stats.zscore(summary[cols[:-1]])) < 3).all(axis=1)]
-
     # Save dataframes (raw, averaged, normalized, normalized averaged)
-    save_dataframes(summary, cols)
+    save_dataframes(summary, cols, group_cols=['strain', 'construct', 'condition', 'rep'])
 
     logger.info('saved puncta feature averaged-per-cell dataframes')
