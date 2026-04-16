@@ -34,13 +34,14 @@ plt.rcParams.update({'font.size': 14})
 sns.set_palette('Paired')
 
 # --- configuration ---
-STD_THRESHOLD = 3.8
-SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
-COI_1 = 1  # channel of interest for saturation check (e.g., 1 for channel 2)
-COI_2 = 0  # secondary channel of interest for comparisons
-COI_1_name = 'TDP43-YFP'  # name of the first channel of interest, for plotting
-COI_2_name  = 'DAPI'  # name of the second channel of interest, for plotting
-MIN_PUNCTA_SIZE = 4  # minimum size of puncta
+STD_THRESHOLD = 2.0  # number of standard deviations above mean to set as threshold for puncta detection, per cell
+SATURATION_THRESHOLD = 2**16 - 1  # max intensity for 16-bit images
+SATURATION_FRAC_CUTOFF = 0.05
+COI_1 = 0  # channel of interest for saturation check (e.g., 1 for channel 2)
+COI_2 = 1  # secondary channel of interest for comparisons
+COI_1_name = 'GFP'  # name of the first channel of interest, for plotting
+COI_2_name  = 'BF'  # name of the second channel of interest, for plotting
+MIN_PUNCTA_SIZE = 3**2  # minimum size of puncta
 SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
@@ -104,26 +105,26 @@ def generate_cytoplasm_masks(masks):
             single_cyto.append(np.zeros_like(cell_mask, dtype=int))
 
         cyto_masks[name] = sum(single_cyto)
-    logger.info('cytoplasm masks created.')
+    logger.info('cytoplasm masks created')
     return cyto_masks
 
 
-def filter_saturated_images(images, cytoplasm_masks, masks):
+def filter_saturated_images(images, cell_masks):
     logger.info('filtering saturated cells...')
     filtered = {}
     for name, img in images.items():
-        # Build a stack: [stain, coi, cytoplasm mask]
-        stack = np.stack([
-            img[COI_2], img[COI_1], cytoplasm_masks[name]
-        ])
+        # wrangle masks to match the expected input for the saturation check function
+        masks_arr = cell_masks[name]
+        masks_arr = np.expand_dims(masks_arr, axis=0)  # add channel dimension
+
         # apply imported saturation check function
         cells = remove_saturated_cells(
-            image_stack=stack,
-            mask_stack=masks[name],
+            image_stack=img,
+            mask_stack=masks_arr,
             COI=COI_1
         )
-        filtered[name] = np.stack([stack[COI_2], stack[COI_1], cells])
-    logger.info('saturated cells filtered.')
+        filtered[name] = np.stack([img[COI_2], img[COI_1], cells])
+    logger.info('saturated cells filtered')
     return filtered
 
 
@@ -185,7 +186,7 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
 
             results.append(df)
 
-    logger.info('feature extraction done.')
+    logger.info('feature extraction done')
     return pd.concat(results, ignore_index=True)
 
 
@@ -224,12 +225,12 @@ def aggregate_features_by_group(df, group_cols, agg_cols, agg_func='mean'):
     return merged_df.reset_index(drop=True)
 
 
-# --- Proof Plotting ---
-def generate_proofs(df, image_dict, coi1=COI_1_name, coi2=COI_2_name):
+def generate_proofs(df, image_dict):
     logger.info('Generating proof plots...')
+
     for name, img in image_dict.items():
-        contour = df.loc[df['image_name']==name, 'cell_coords']
-        coord_list = df.loc[df['image_name']==name, 'puncta_coords']
+        contour = df.loc[df['image_name'] == name, 'cell_coords']
+        coord_list = df.loc[df['image_name'] == name, 'puncta_coords']
 
         if contour.empty:
             continue
@@ -237,30 +238,49 @@ def generate_proofs(df, image_dict, coi1=COI_1_name, coi2=COI_2_name):
         coi2, coi1, mask = img
         cell_img = coi1 * (mask > 0)
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10,6))
-        ax1.imshow(coi1, cmap='gray_r')
-        ax1.imshow(coi2, cmap='Blues', alpha=0.6)
+        h, w = coi1.shape
+        aspect = w / h
 
+        # figure size adapts to image aspect
+        base_height = 5
+        fig_width = base_height * aspect * 2   # two panels
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(fig_width, base_height), constrained_layout=True)
+
+        # scale linewidth based on image size
+        lw = max(0.5, min(h, w) / 2000)
+
+        # --- overlay image ---
+        ax1.imshow(coi1, cmap='gray_r')
+        # ax1.imshow(coi2, cmap='Blues', alpha=0.6)
+
+        # --- cell panel ---
         ax2.imshow(cell_img, cmap='gray_r')
+
         for line in contour.iloc[0]:
-            ax2.plot(line[:,1], line[:,0], c='k', lw=0.5)
+            ax2.plot(line[:, 1], line[:, 0], c='k', lw=lw)
 
         if len(coord_list) > 1:
             for puncta in coord_list:
                 if isinstance(puncta, np.ndarray):
-                    ax2.plot(puncta[:,1], puncta[:,0], lw=0.5)
+                    ax2.plot(puncta[:, 1], puncta[:, 0], lw=lw)
 
-        scalebar = ScaleBar(SCALE_PX, SCALE_UNIT, location='lower right',
-                            pad=0.3, sep=2, box_alpha=0, color='gray',
-                            length_fraction=0.3)
+        # scalebar stays fractional already
+        scalebar = ScaleBar(SCALE_PX, SCALE_UNIT, location='lower right', pad=0.3, sep=2, box_alpha=0, color='gray', length_fraction=0.3)
         ax1.add_artist(scalebar)
-        ax1.text(50, 2000, COI_1_name, color='gray')
-        ax1.text(50, 1800, COI_2_name, color='steelblue')
-        fig.suptitle(name, y=0.88)
-        fig.tight_layout()
+
+        # --- axis-relative text placement ---
+        ax1.text(0.02, 0.95, COI_1_name, color='gray', transform=ax1.transAxes, ha='left', va='top')
+        # ax1.text(0.02, 0.88, COI_2_name, color='steelblue', transform=ax1.transAxes, ha='left', va='top')
+
+        for ax in (ax1, ax2):
+            ax.set_axis_off()
+
+        fig.suptitle(name, y=1.05)
+
         fig.savefig(f'{proofs_folder}{name}_proof.png', dpi=300, bbox_inches='tight')
         plt.close(fig)
-    logger.info('proofs saved.')
+
+    logger.info('proofs saved')
 
 
 if __name__ == '__main__':
@@ -274,21 +294,25 @@ if __name__ == '__main__':
 
     # -- OR collect and filter cell masks ---
     cell_masks = {name: mask[0] for name, mask in masks.items()}
-    filtered = filter_saturated_images(images, cell_masks, masks)
+    filtered = filter_saturated_images(images, cell_masks)
 
     # --- feature extraction ---
     features = collect_features(filtered)
     features = extra_puncta_features(features)
 
+    # # --- remove long puncta that are likely false positives, based on aspect ratio ---
+    # features = features[~(features['puncta_aspect_ratio'] <= 0.2)]
+
     # --- generate proofs ---
-    generate_proofs(features, filtered, coi1=COI_1, coi2=COI_2)
-    logger.info('proofs complete.')
+    generate_proofs(features, filtered)
+    logger.info('proofs complete')
 
     # --- data wrangling ---
     logger.info('starting data wrangling and saving...')
-    features['tag'] = ['EYFP' for name in features['image_name']]
-    features['condition'] = features['image_name'].str.split('-').str[0]
-    features['rep'] = features['image_name'].str.split('-').str[-2]
+    features['strain'] = features['image_name'].str.split('_').str[1]
+    features['construct'] = features['image_name'].str.split('_').str[2]
+    features['condition'] = features['image_name'].str.split('_').str[3].str.split('-').str[0]
+    features['rep'] = features['image_name'].str.split('_').str[0]
 
     cols = features.columns.tolist()
     cols = [item for item in cols if '_coords' not in item]
@@ -300,6 +324,9 @@ if __name__ == '__main__':
     # # remove outliers based on z-score
     # features = features[(np.abs(stats.zscore(features[cols[:-1]])) < 3).all(axis=1)]
 
+    # remove rep 2026-03-13 for y49 due to different acquisition settings that cause saturation and skew the data, but keep for now for proofs
+    features = features[~((features['rep'] == '2026-03-13') & (features['strain'] == 'y49'))]
+
     # --- data trimming and saving ---
     # trim off coordinates used for proofs, save the main features dataframe
     cols_to_drop = [col for col in features.columns if '_coords' in col]
@@ -307,7 +334,7 @@ if __name__ == '__main__':
     features.to_csv(f'{output_folder}puncta_features.csv', index=False)
 
     # save averages per biological replicate
-    rep_df = aggregate_features_by_group(features, ['condition', 'tag', 'rep'], cols)
+    rep_df = aggregate_features_by_group(features, ['strain', 'construct', 'condition', 'rep'], cols)
     rep_df.to_csv(f'{output_folder}puncta_features_reps.csv', index=False)
 
     # save features normalized to cell intensity of channel of interest
@@ -317,8 +344,8 @@ if __name__ == '__main__':
     df_norm.to_csv(f'{output_folder}puncta_features_normalized.csv', index=False)
 
     # save normalized averages per biological replicate
-    rep_norm_df = aggregate_features_by_group(df_norm, ['condition', 'tag', 'rep'], cols)
+    rep_norm_df = aggregate_features_by_group(df_norm, ['strain', 'construct', 'condition', 'rep'], cols)
     rep_norm_df.to_csv(f'{output_folder}puncta_features_normalized_reps.csv', index=False)
 
     logger.info('data wrangling and saving complete.')
-    logger.info('pipeline complete.')
+    logger.info('pipeline complete')
