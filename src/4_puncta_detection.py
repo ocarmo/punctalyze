@@ -34,13 +34,13 @@ plt.rcParams.update({'font.size': 14})
 sns.set_palette('Paired')
 
 # --- configuration ---
-STD_THRESHOLD = 2.2  # number of standard deviations above mean for puncta thresholding
+STD_THRESHOLD = 3  # number of standard deviations above mean for puncta thresholding
 SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
 COI_1 = 1  # channel of interest for saturation check (e.g., 1 for channel 2)
 COI_2 = 0  # secondary channel of interest for comparisons
 COI_1_name = 'mCherry-LIP5'  # name of the first channel of interest, for plotting
 COI_2_name  = 'eGFP'  # name of the second channel of interest, for plotting
-MIN_PUNCTA_SIZE = 2**3  # minimum size of puncta
+MIN_PUNCTA_SIZE = 2**4  # minimum size of puncta
 SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
@@ -83,7 +83,7 @@ def load_masks(mask_folder):
 
 
 def generate_cytoplasm_masks(masks):
-    logger.info('removing nuclei from cell masks...')
+    # logger.info('removing nuclei from cell masks...')
     cyto_masks = {}
     for name, img in masks.items():
         cell_mask, nuc_mask = img[0], img[1]
@@ -109,7 +109,7 @@ def generate_cytoplasm_masks(masks):
 
 
 def filter_saturated_images(images, masks):
-    logger.info('filtering saturated cells...')
+    # logger.info('filtering saturated cells...')
     filtered = {}
     for name, img in images.items():
         # wrangle masks to match the expected input for the saturation check function
@@ -128,18 +128,22 @@ def filter_saturated_images(images, masks):
 
         # build stack for downstream processing as [coi2, coi1, cell_masks]
         filtered[name] = np.stack([img[COI_2], img[COI_1], cells])
-    logger.info('saturated cells filtered')
+    # logger.info('saturated cells filtered')
     return filtered
 
 
 def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
-    logger.info('collecting cell & puncta features...')
+    # logger.info('collecting cell and puncta features...')
     results = []
     for name, img in image_dict.items():
         coi2, coi1, mask = img
         unique_cells = np.unique(mask)[1:]
         contours = measure.find_contours((mask > 0).astype(int), 0.8)
         contour = [c for c in contours if len(c) >= 100]
+
+        # if no masks, skip this image
+        if len(unique_cells) == 0:
+            continue
 
         for lbl in unique_cells:
             cell_mask = mask == lbl
@@ -171,7 +175,7 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
                     p_mask = puncta_labels == row['puncta_label']
                     puncta_vals = coi1[p_mask]
                     cv = puncta_vals.std() / puncta_vals.mean() if puncta_vals.mean() != 0 else np.nan
-                    skew_stat = skewtest(puncta_vals).statistic if len(puncta_vals) >= 8 else np.nan
+                    skew_stat = skewtest(puncta_vals).statistic if len(puncta_vals) >= 16 else np.nan
                     mean_p = puncta_vals.mean()
                     mean_coi2 = coi2[p_mask].mean()
                     stats_list.append((cv, skew_stat, mean_p, mean_coi2))
@@ -196,8 +200,11 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
             df['cell_coords'] = [contour] * len(df)
 
             results.append(df)
+    
+    if not results:
+        return pd.DataFrame()   
 
-    logger.info('feature extraction done')
+    # logger.info('feature extraction done')
     return pd.concat(results, ignore_index=True)
 
 
@@ -238,7 +245,7 @@ def aggregate_features_by_group(df, group_cols, agg_cols, agg_func='mean'):
 
 # --- Proof Plotting ---
 def generate_proofs(df, image_dict):
-    logger.info('generating proof plots...')
+    # logger.info('generating proof plots...')
 
     for name, img in image_dict.items():
         contour = df.loc[df['image_name'] == name, 'cell_coords']
@@ -278,7 +285,7 @@ def generate_proofs(df, image_dict):
         if len(coord_list) > 1:
             for puncta in coord_list:
                 if isinstance(puncta, np.ndarray):
-                    ax2.plot(puncta[:, 1], puncta[:, 0], lw=lw)
+                    ax2.plot(puncta[:, 1], puncta[:, 0], lw=0.1)
 
         # scalebar stays fractional already
         scalebar = ScaleBar(SCALE_PX, SCALE_UNIT, location='lower right', pad=0.3, sep=2, box_alpha=0, color='gray', length_fraction=0.3)
@@ -297,81 +304,119 @@ def generate_proofs(df, image_dict):
         fig.savefig(f'{proofs_folder}{name}_proof.png', dpi=600, bbox_inches='tight')
         plt.close(fig)
 
-    logger.info('proofs saved.')
-
 
 if __name__ == '__main__':
-    logger.info('loading images and masks...')
-    images = load_images(image_folder)
-    masks = load_masks(mask_folder)
 
-    # keep only images with masks, and for testing, limit to a subset
-    images = {name: img for name, img in images.items() if name in masks}
-    
-    # # -- generate and filter cytoplasm masks ---
-    # cyto_masks = generate_cytoplasm_masks(masks)
-    # # plot histogram of unique cyto mask sizes within each array to choose a cutoff for filtering small masks that are likely debris
-    # all_sizes = []
-    # for mask in cyto_masks.values():
-    #     unique_masks = np.unique(mask)[1:]  # exclude background
-    #     for lbl in unique_masks:
-    #         size = np.sum(mask == lbl)
-    #         all_sizes.append(size)
-    # sns.histplot(all_sizes, bins=50, kde=True)
-    # cytosize_threshold = np.quantile(all_sizes, 0.1)
+    image_files = [f for f in os.listdir(image_folder) if f.endswith('.npy')]
 
-    # # remove a cytoplasm mask size if less than cytosize_threshold, to be sure we aren't analyzing tiny debris
-    # for name, mask in cyto_masks.items():
-    #     unique_masks = np.unique(mask)[1:]  
-    #     for lbl in unique_masks:
-    #         if np.sum(mask == lbl) < cytosize_threshold:
-    #             mask[mask == lbl] = 0
-    # filtered = filter_saturated_images(images, cyto_masks)
+    all_features = []
 
-    # -- OR collect and filter cell masks ---
-    cell_masks = {name: mask[0] for name, mask in masks.items()}
-    filtered = filter_saturated_images(images, cell_masks)
+    for fname in image_files:
+        name = fname.removesuffix('.npy')
 
-    # --- feature extraction ---
-    features = collect_features(filtered)
-    features = extra_puncta_features(features)
+        mask_path = os.path.join(mask_folder, f"{name}_mask.npy")
+        if not os.path.exists(mask_path):
+            continue
 
-    # --- name wrangling ---
-    features['condition'] = features['image_name'].str.split('-0').str[0]
+        logger.info(f'processing {name}')
+
+        # --- load only this image ---
+        image = np.load(os.path.join(image_folder, fname))
+        mask = np.load(mask_path, allow_pickle=True)
+
+        cell_mask = mask[0]
+
+        # --- wrangle channels to match expected input for saturation check ---
+        if 'mCh' in name:
+            image = np.stack([image[COI_2], image[COI_1]])
+        else:
+            image = np.stack([image[COI_1], image[COI_2]])
+
+        # --- filter ---
+        filtered_img = filter_saturated_images(
+            {name: image}, 
+            {name: cell_mask}
+        )[name]
+
+        # --- features (single image only) ---
+        df = collect_features({name: filtered_img})
+        if df.empty:
+            logger.warning(f"No valid features for {name}, skipping")
+            continue
+        df = extra_puncta_features(df)
+
+        # --- proof immediately ---
+        generate_proofs(df, {name: filtered_img})
+        cols_to_drop = [col for col in df.columns if '_coords' in col]
+        df = df.drop(columns=cols_to_drop)
+
+        # --- store results ---
+        all_features.append(df)
+
+        # free memory
+        del image, mask, filtered_img, df
+
+    features = pd.concat(all_features, ignore_index=True)
+
+    # # # -- generate and filter cytoplasm masks ---
+    # # cyto_masks = generate_cytoplasm_masks(masks)
+    # # # plot histogram of unique cyto mask sizes within each array to choose a cutoff for filtering small masks that are likely debris
+    # # all_sizes = []
+    # # for mask in cyto_masks.values():
+    # #     unique_masks = np.unique(mask)[1:]  # exclude background
+    # #     for lbl in unique_masks:
+    # #         size = np.sum(mask == lbl)
+    # #         all_sizes.append(size)
+    # # sns.histplot(all_sizes, bins=50, kde=True)
+    # # cytosize_threshold = np.quantile(all_sizes, 0.1)
+
+    # # # remove a cytoplasm mask size if less than cytosize_threshold, to be sure we aren't analyzing tiny debris
+    # # for name, mask in cyto_masks.items():
+    # #     unique_masks = np.unique(mask)[1:]  
+    # #     for lbl in unique_masks:
+    # #         if np.sum(mask == lbl) < cytosize_threshold:
+    # #             mask[mask == lbl] = 0
+    # # filtered = filter_saturated_images(images, cyto_masks)
+
+    # # -- OR collect and filter cell masks ---
+    # cell_masks = {name: mask[0] for name, mask in masks.items()}
+    # filtered = filter_saturated_images(images, cell_masks)
+
+    # # --- feature extraction ---
+    # features = collect_features(filtered)
+    # features = extra_puncta_features(features)
 
     # --- filter out dimmest puncta ---
     sns.histplot(features['puncta_intensity_mean'], kde=True)   
-    intensity_threshold = features['puncta_intensity_mean'].quantile(0.2)
-    features = features[features['puncta_intensity_mean'] >= intensity_threshold]
+    # intensity_threshold = features['puncta_intensity_mean'].quantile(0.2)
+    # features = features[features['puncta_intensity_mean'] >= intensity_threshold]
 
-    # --- remove long puncta that are likely false positives, based on aspect ratio ---
+    # # --- remove long puncta that are likely false positives, based on aspect ratio ---
     sns.histplot(features['puncta_aspect_ratio'], kde=True)   
-    features = features[~(features['puncta_aspect_ratio'] <= 0.2)]
-
-    # --- generate proofs ---
-    generate_proofs(features, filtered)
-    logger.info('proofs complete.')
+    # aspect_ratio_threshold = features['puncta_aspect_ratio'].quantile(0.1)
+    # features = features[features['puncta_aspect_ratio'] >= aspect_ratio_threshold]
 
     # --- data wrangling ---
     logger.info('starting data wrangling and saving...')
-    features['tag'] = features['image_name'].str.split('_').str[0]
-    features['condition'] = features['image_name'].str.split('_').str[1]
-    features['rep'] = features['image_name'].str.split('_').str[0]
+    features['tag'] = features['image_name'].str.split('_').str[2].str.split('-').str[0] 
+    features['condition'] = features['image_name'].str.split('_').str[2]
+    features['rep'] = features['image_name'].str.split('_').str[0] + '_' + features['image_name'].str.split('_').str[1]
 
-    cols = features.columns.tolist()
-    cols = [item for item in cols if '_coords' not in item]
-    cols = ['puncta_area', 'puncta_eccentricity', 'puncta_aspect_ratio',
-            'puncta_circularity', 'puncta_cv', 'puncta_skew',
-            'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
-            'cell_cv', 'cell_skew']
+    # --- remove dimmest quartile of cells per construct ---
+    sns.histplot(data=features, x='cell_coi1_intensity_mean', hue='condition', kde=True)   
+    for cond in features['condition'].unique():
+        subset = features[features['condition'] == cond]
+        dimcell_threshold = subset['cell_coi1_intensity_mean'].quantile(0.25)
+        features = features[ ~( (features['condition'] == cond) & (features['cell_coi1_intensity_mean'] < dimcell_threshold) ) ]
 
-    # --- data trimming and saving ---
-    # trim off coordinates used for proofs, save the main features dataframe
-    cols_to_drop = [col for col in features.columns if '_coords' in col]
-    features = features.drop(columns=cols_to_drop)
+    # --- data saving ---
     features.to_csv(f'{output_folder}puncta_features.csv', index=False)
 
     # save averages per biological replicate
+    cols = ['puncta_area', 'puncta_eccentricity', 'puncta_aspect_ratio',
+            'puncta_circularity', 'puncta_cv', 'puncta_skew',
+            'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
+            'cell_cv', 'cell_skew']    
     rep_df = aggregate_features_by_group(features, ['condition', 'tag', 'rep'], cols)
     rep_df.to_csv(f'{output_folder}puncta_features_reps.csv', index=False)
 
