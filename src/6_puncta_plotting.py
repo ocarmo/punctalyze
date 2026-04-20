@@ -56,9 +56,9 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
     N_min, N_max = N_per_group.min(), N_per_group.max()
     n_min, n_max = n_per_group.min(), n_per_group.max()
 
-    summary_text = f"N = {N_min}–{N_max} images\nn = {n_min}–{n_max} cells"
+    summary_text = f"N = {N_min}–{N_max} replicates\nn = {n_min}–{n_max} cells"
 
-    fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(20, 30))
+    fig, axes = plt.subplots(nrows=4, ncols=4, figsize=(30, 30))
     axes = axes.flatten()
 
     if hue is None:
@@ -77,6 +77,11 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
                 annotator.configure(test='t-test_ind', verbose=0)
                 annotator.apply_test()
                 annotator.annotate()
+
+            # make horizontal axis line at mean of mCherry-LIP5 construct
+            data_agg_lip5 = data_agg[data_agg['condition'] == 'mCherry-LIP5']
+            mean_value = data_agg_lip5[feature].mean()
+            ax.axhline(y=mean_value, color='gray', linestyle='--', linewidth=2)
 
         # turn off unused subplots
         for j in range(len(features), len(axes)):
@@ -102,7 +107,6 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
         fig.savefig(os.path.join(output_folder, save_name), bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
 
-
     else:   
         for i, feature in enumerate(features):
             ax = axes[i]
@@ -112,8 +116,9 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
                         linewidth=1, size=8, hue=hue, order=order, ax=ax)
             sns.boxplot(data=data_agg, x=x, y=feature, palette=['.9'], hue=hue,
                         order=order, ax=ax)
-
-            ax.legend_.remove()
+            
+            if ax.legend_ is not None:
+                ax.legend_.remove()
             sns.despine()
 
             if pairs:
@@ -124,7 +129,7 @@ def plot_stats(data_raw, data_agg, features, title, save_name, x='condition', hu
 
         for ax in axes[len(features):]:
             ax.axis('off')
-
+        
         fig.text(1.0, 0.9, summary_text)   # add N/n annotation near legend
         fig.suptitle(title, fontsize=18, y=0.99)
         handles, labels = ax.get_legend_handles_labels()
@@ -172,19 +177,27 @@ if __name__ == '__main__':
 
     puncta_features = ['puncta_area', 'puncta_eccentricity', 'puncta_aspect_ratio',
                 'puncta_circularity', 'puncta_cv', 'puncta_skew',
-                'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
+                'coi1_partition_coeff', 'cell_std',
                 'cell_cv', 'cell_skew']
 
     percell_features = ['cell_size', 'mean_puncta_area', 'puncta_area_proportion', 'puncta_count',
             'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'puncta_mean_aspect_ratio','avg_eccentricity',
-            'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
+            'puncta_cv_mean', 'puncta_skew_mean', 'coi1_partition_coeff', 'cell_std',
             'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean']
+
+    # # drop rows with 'eGFP' in condition for all dataframes
+    # for key in dfs:
+    #     dfs[key] = dfs[key][~dfs[key]['condition'].str.contains('eGFP')]
+
+    # # keep rows with 'eGFP' or == 'mCherry-LIP5' in condition for all dataframes
+    # for key in dfs:
+    #     dfs[key] = dfs[key][dfs[key]['condition'].str.contains('eGFP') | (dfs[key]['condition'] == 'mCherry-LIP5')]
 
     # could use combinations function to generate pairs dynamically, but here we define them explicitly
     conditions = dfs['puncta_features']['condition'].unique().tolist()
     paired_conditions = combinations(conditions, 2)
     paired_list = list(paired_conditions)
-    paired_list = [pair for pair in paired_list if 'WT' in pair]  # only compare to WT
+    paired_list = [pair for pair in paired_list if 'mCherry-LIP5' in pair]  # only compare to WT
     order = sorted(conditions)
     # palette = ['#A6CEE3', '#1F78B4', '#F5CB5C']
     palette = sns.color_palette('tab10', n_colors=len(conditions))
@@ -197,13 +210,9 @@ if __name__ == '__main__':
         ('per cell, normalized', percell_features, dfs['percell_norm'], dfs['percell_norm_reps'], 'percell_normalized.png'),
     ]
 
-    # TODO make plotting more dynamic to handle stats/no-stats cases
     logger.info('Generating paired plots with stats...')
     for title, features, raw_df, reps_df, filename in plotting_configs:
         title
         plot_stats(raw_df, reps_df, features, f'Calculated Parameters - {title}', filename,
                    x='condition', hue=None, pairs=paired_list, order=order)
 
-    # TODO fix partition coefficient plots
-    logger.info('Generating partition coefficient plots...')
-    plot_partition_coefficients(dfs['percell'], dfs['percell_reps'], 'condition-paired_percell_raw_partition-only.png', order=order)

@@ -108,9 +108,9 @@ if __name__ == '__main__':
     summary = calculate_cell_features(feature_information)
 
     # Add metadata columns
-    summary['tag'] = summary['image_name'].str.split('_').str[0]
-    summary['condition'] = summary['image_name'].str.split('_').str[1]
-    summary['rep'] = summary['image_name'].str.split('_').str[0]
+    summary['tag'] = summary['image_name'].str.split('_').str[2].str.split('-').str[0] 
+    summary['condition'] = summary['image_name'].str.split('_').str[2]
+    summary['rep'] = summary['image_name'].str.split('_').str[0] + '_' + summary['image_name'].str.split('_').str[1]
 
     # Define features of interest (excluding metadata columns)
     cols = summary.columns.tolist()
