@@ -43,7 +43,7 @@ def apply_cellpose(images, image_type='sam', diameter=None, flow_threshold=0.4, 
             - styles (list): list of styles used by cellpose.
 
     """
-    model = models.CellposeModel(model_type=image_type, gpu=use_gpu)
+    # model = models.CellposeModel(model_type=image_type, gpu=use_gpu)
     images = [img.astype(np.uint16) for img in images]
 
     if big_images == True:
@@ -86,7 +86,7 @@ def apply_cellpose(images, image_type='sam', diameter=None, flow_threshold=0.4, 
     return masks, flows, styles
 
 
-def visualise_cell_pose(images, masks, flows, big_images=False):
+def visualise_cellpose(images, masks, flows, big_images=False):
     """visualise the results of cellpose on a list of images, masks, and flows.
 
     Args:
@@ -101,8 +101,7 @@ def visualise_cell_pose(images, masks, flows, big_images=False):
         ax[0].set_title("original")
 
         # plot flow fields
-        # flow = flows[idx] if big_images else flows[idx][0][0]
-        flow = flows[idx]
+        flow = flows[idx] if big_images else flows[idx][0][0]
         ax[1].imshow(flow)
         ax[1].set_title("flows")
 
@@ -120,6 +119,7 @@ def visualise_cell_pose(images, masks, flows, big_images=False):
         plt.tight_layout()
         plt.show()
 
+
 if __name__ == '__main__':
     
     # ---------------- initialise file list ----------------
@@ -129,21 +129,61 @@ if __name__ == '__main__':
     images_dict = {filename.replace('.npy', ''): np.load(
         f'{image_folder}{filename}') for filename in file_list}
 
-    # ---------------- prepare images ----------------
-    # Cellpose-SAM will use the first 3 channels of your image, truncating the rest. It has been trained with the cytoplasm and nuclear channels in any order, with the other channel set to zero.
-    # you can combine two stains to create your "cytoplasm" channel
-    # in this example indices 0 and 1 (1st and 2nd) have two cellular stains, and nuclei are in index 2 (3rd channel)
-    imgs_cp = [np.stack((img[[0,1]].sum(axis=0), img[2]), axis=0) for name, img in images_dict.items()]
+    # # ---------------- prepare images ----------------
+    # # Cellpose-SAM will use the first 3 channels of your image, truncating the rest. It has been trained with the cytoplasm and nuclear channels in any order, with the other channel set to zero.
+    # # you can combine two stains to create your "cytoplasm" channel
+    # # in this example indices 0 and 1 (1st and 2nd) have two cellular stains, and nuclei are in index 2 (3rd channel)
+    # # subtract one image from another to reduce background and improve segmentation
+    # imgs_cp = {
+    #     name: np.stack((img[1], img[2], np.maximum(img[-1].astype(np.int32) - img[0].astype(np.int32), 0).astype(np.uint16)), axis=0)
+    #     for name, img in images_dict.items()
+    # }
 
-    # other packages to preprocess images and improve segmentation if needed
-    # gaussian_blur = [filters.gaussian(image, sigma=1, multichannel=True) for image in imgs_cp]
-    # brightened = [np.clip(channel*5, 0, 65535).astype(np.uint16) for channel in imgs_cp] # assumes 16-bit images
+    # # preprocessing for segmenting cells from a puncta only channel - will blur the puncta and log transform to enhance the cell borders, but will not work well if the puncta are very bright and large
+    # imgs_cp = {
+    #     name: np.stack([
+    #         (np.log1p(filters.gaussian(ch.astype(np.float32), sigma=1, preserve_range=True)) /
+    #         np.log1p(filters.gaussian(ch.astype(np.float32), sigma=1, preserve_range=True).max()) * 65535).astype(np.uint16)
+    #         for ch in img[:-1]
+    #     ], axis=0)
+    #     for name, img in imgs_cp.items()
+    # } 
+
+    # ---------------- check existing masks ----------------
+    existing_masks = {
+        fname.replace('_sammask.npy', '')
+        for fname in os.listdir(output_folder)
+        if fname.endswith('_sammask.npy')
+    }
+
+    logger.info(f'{len(existing_masks)} masks already exist, will skip these')
 
     # ---------------- apply cellpose ----------------
-    masks, flows, styles = apply_cellpose(imgs_cp, niter=2000, big_images=True)
-    # check the masks with visualisation, else you can skip this step
-    visualise_cell_pose(imgs_cp, masks, flows, big_images=True)
+    model = models.CellposeModel(model_type='sam', gpu=True)
 
-    # ---------------- save masks ----------------
-    np.save(f'{output_folder}cellpose_cellmasks.npy', masks)
-    logger.info('cell masks saved')
+    # TODO: change images_dict to imgs_cp dictionary
+    for name, img in images_dict.items():
+        name
+        if name in existing_masks:
+            logger.info(f'skipping {name}, mask already exists.')
+            continue
+        
+        # optional: remove one channel from another
+        img = np.stack((img[1], np.maximum(img[-1].astype(np.int32) - img[0].astype(np.int32), 0).astype(np.uint16)), axis=0)
+        
+        logger.info(f'processing {name}...')
+        masks, flows, styles = apply_cellpose(
+            [img],
+            niter=2000,
+            big_images=True,
+            cellprob_threshold=-2.0,
+            flow_threshold=0.8
+        )
+
+        # check the masks with visualisation, else you can skip this step
+        visualise_cellpose([[images_dict[name][[0,1]].sum(axis=0)]], masks, flows, big_images=True)
+
+        # ---------------- save masks ----------------
+        out_path = os.path.join(output_folder, f'{name}_sammask.npy')
+        np.save(out_path, masks[0])
+        logger.info('cell masks saved')
