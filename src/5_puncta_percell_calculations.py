@@ -25,39 +25,44 @@ input_folder = 'results/summary_calculations/'
 output_folder = 'results/summary_calculations/'
 
 
-def calculate_cell_features(df):
+def calculate_cell_features(df, group_cols=['image_name', 'cell_number']):
     """Calculate summarized features per cell from puncta features."""
-    
-    group_cols = ['image_name', 'cell_number']
 
-    # Use pandas groupby + agg with named aggregations
-    agg_df = df.groupby(group_cols).agg({
-        'puncta_minor_axis_length': 'mean',
-        'puncta_major_axis_length': 'mean',
-        'puncta_aspect_ratio': 'mean',
-        'puncta_area': ['mean', 'sum', 'count'],
-        'cell_size': 'mean',
-        'puncta_eccentricity': 'mean',
-        'puncta_cv': 'mean',
-        'puncta_skew': 'mean',
-        'coi2_partition_coeff': 'mean',
-        'coi1_partition_coeff': 'mean',
-        'cell_std': 'mean',
-        'cell_cv': 'mean',
-        'cell_skew': 'mean',
-        'cell_coi1_intensity_mean': 'mean',
-        'puncta_intensity_mean': 'mean'
-    })
+    agg_df = df.groupby(
+        group_cols
+    ).agg(
+        puncta_mean_minor_axis=('puncta_minor_axis_length', 'mean'),
+        puncta_mean_major_axis=('puncta_major_axis_length', 'mean'),
+        puncta_mean_aspect_ratio=('puncta_aspect_ratio', 'mean'),
+        mean_puncta_area=('puncta_area', 'mean'),
+        puncta_area_sum=('puncta_area', 'sum'),
+        puncta_count=('puncta_area', 'count'),
+        puncta_area_proportion=('puncta_area_proportion', 'sum'),
+        coi2_puncta_area_proportion=('coi2_puncta_area_proportion', 'sum'),
+        cell_size=('cell_size', 'first'),
+        avg_eccentricity=('puncta_eccentricity', 'mean'),
+        puncta_cv_mean=('puncta_cv', 'mean'),
+        puncta_skew_mean=('puncta_skew', 'mean'),
+        coi2_partition_coeff=('coi2_partition_coeff', 'mean'),
+        coi1_partition_coeff=('coi1_partition_coeff', 'mean'),
+        cell_std=('cell_std', 'mean'),
+        cell_cv=('cell_cv', 'mean'),
+        cell_skew=('cell_skew', 'mean'),
+        cell_coi1_intensity_mean=('cell_coi1_intensity_mean', 'mean'),
+        cell_coi2_intensity_mean=('cell_coi2_intensity_mean', 'mean'),
+        puncta_intensity_mean=('puncta_intensity_mean', 'mean')
+    ).reset_index()
 
-    # Flatten MultiIndex columns from aggregation
-    agg_df.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col 
-        for col in agg_df.columns.values]
-    agg_df = agg_df.reset_index()
+    agg_df['puncta_area_proportion'] *= 100
+    agg_df['coi2_puncta_area_proportion'] *= 100
 
-    # Calculate puncta area proportion (%)
-    agg_df['puncta_area_proportion'] = (agg_df['puncta_area_sum'] / agg_df['cell_size_mean']) * 100
+    # flatten MultiIndex columns
+    agg_df.columns = [
+        '_'.join(col).strip() if isinstance(col, tuple) else col
+        for col in agg_df.columns.values
+    ]
 
-    # Rename columns for clarity
+    # rename columns
     agg_df = agg_df.rename(columns={
         'puncta_minor_axis_length_mean': 'puncta_mean_minor_axis',
         'puncta_major_axis_length_mean': 'puncta_mean_major_axis',
@@ -65,8 +70,6 @@ def calculate_cell_features(df):
         'puncta_area_mean': 'mean_puncta_area',
         'puncta_area_count': 'puncta_count',
         'puncta_eccentricity_mean': 'avg_eccentricity',
-        'puncta_cv_mean': 'puncta_cv_mean',
-        'puncta_skew_mean': 'puncta_skew_mean',
         'coi2_partition_coeff_mean': 'coi2_partition_coeff',
         'coi1_partition_coeff_mean': 'coi1_partition_coeff',
         'cell_std_mean': 'cell_std',
@@ -74,7 +77,7 @@ def calculate_cell_features(df):
         'cell_skew_mean': 'cell_skew',
         'cell_coi1_intensity_mean_mean': 'cell_coi1_intensity_mean',
         'puncta_intensity_mean_mean': 'puncta_intensity_mean',
-        'cell_size_mean': 'cell_size'
+        'cell_size_first': 'cell_size'
     })
 
     return agg_df
@@ -105,22 +108,18 @@ if __name__ == '__main__':
     feature_information = pd.read_csv(f'{input_folder}puncta_features.csv')
 
     # Calculate summarized features per cell
-    summary = calculate_cell_features(feature_information)
-
-    # Add metadata columns
-    summary['tag'] = summary['image_name'].str.split('_').str[2].str.split('-').str[0] 
-    summary['condition'] = summary['image_name'].str.split('_').str[2]
-    summary['rep'] = summary['image_name'].str.split('_').str[0] + '_' + summary['image_name'].str.split('_').str[1]
+    summary = calculate_cell_features(feature_information, group_cols=['image_name', 'cell_number', 'tag', 'condition', 'mcherry_bait', 'rep'])
 
     # Define features of interest (excluding metadata columns)
     cols = summary.columns.tolist()
     cols = [item for item in cols if '_coords' not in item]
     cols = ['cell_size', 'mean_puncta_area', 'puncta_area_proportion', 'puncta_count',
         'puncta_mean_minor_axis', 'puncta_mean_major_axis', 'puncta_mean_aspect_ratio','avg_eccentricity',
+        'coi2_puncta_area_proportion', 'cell_coi2_intensity_mean',
         'puncta_cv_mean', 'puncta_skew_mean', 'coi2_partition_coeff', 'coi1_partition_coeff', 'cell_std',
         'cell_cv', 'cell_skew', 'cell_coi1_intensity_mean', 'puncta_intensity_mean']
 
     # Save dataframes (raw, averaged, normalized, normalized averaged)
-    save_dataframes(summary, cols)
+    save_dataframes(summary, cols, group_cols=['condition', 'mcherry_bait', 'rep'])
 
     logger.info('saved puncta feature averaged-per-cell dataframes')
