@@ -129,6 +129,9 @@ def filter_masks_auto(image_stack, mask_stack, filter_fluoro=False):
     if filter_fluoro:
         cells_filtered = filter_cells_by_fluoro_expression(image_stack, cells_filtered)
 
+    # remove cells less than 50x50 pixels in area
+    cells_filtered = np.where(np.isin(cells_filtered, [label for label in np.unique(cells_filtered)[1:] if np.count_nonzero(cells_filtered == label) >= 2500]), cells_filtered, 0)
+
     intra_nuclei = np.where(cells_filtered > 0, nuclei, 0)
     filtered_nuclei = filter_small_nuclei(nuclei) # note, do not want to remove all nuclei for now
 

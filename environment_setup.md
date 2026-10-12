@@ -16,6 +16,8 @@ conda install conda-forge::napari matplotlib-scalebar
 conda install conda-forge::seaborn statannotations
 pip install bioio bioio-ome-tiff bioio-ome-zarr bioio-czi bioio-nd2
 conda install numpy=1.26 # later had to run this due to numpy issues
+pip install --upgrade bioio bioio-base aicspylibczi
+```
 ```
 
 ### homebrew help for macos

@@ -45,7 +45,7 @@ def apply_cellpose(images, image_type='sam', diameter=None, flow_threshold=0.4, 
             - styles (list): list of styles used by cellpose.
 
     """
-    model = models.CellposeModel(model_type=image_type, gpu=use_gpu)
+    # model = models.CellposeModel(model_type=image_type, gpu=use_gpu)
     images = [img.astype(np.uint16) for img in images]
 
     if big_images == True:
@@ -89,7 +89,7 @@ def apply_cellpose(images, image_type='sam', diameter=None, flow_threshold=0.4, 
 
 
 def visualise_cellpose(images, masks, flows, big_images=False):
-    """ Visualise the results of cellpose on a list of images, masks, and flows.
+    """visualise the results of cellpose on a list of images, masks, and flows.
 
     Args:
         images (list): list of np.array images, each image should be a numpy array with shape (channels, height, width)
