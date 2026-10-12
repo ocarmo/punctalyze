@@ -180,6 +180,9 @@ def scene_finder(image_path, names_mapped, experiment_prefix=True, MIP=False):
     # Map scene name
     bio_image = BioImage(image_path)
     well_name = bio_image.current_scene
+    if well_name not in names_mapped.keys():
+        logger.warning(f'No mapping found for scene {well_name} in {image_path}. Skipping save.')
+        return
     well_id = names_mapped[well_name]
 
     if experiment_prefix:
@@ -188,6 +191,11 @@ def scene_finder(image_path, names_mapped, experiment_prefix=True, MIP=False):
 
     if any(word in well_id for word in do_not_quantitate):
         logger.info(f'Skipping {well_id} due to do_not_quantitate criteria')
+        return
+    
+    # if image already exists in ouptut folder, skip
+    if os.path.exists(f'{output_folder}{well_id}.npy'):
+        logger.info(f'Skipping {well_id}, file already exists in output folder.')
         return
 
     np.save(f'{output_folder}{well_id}.npy', stitched)
@@ -269,101 +277,121 @@ if __name__ == '__main__':
     
     # --------------- dictionary of sample names ---------------
     name_dict_0 = {
-        'B2-B2': 'jetprime_eGFP-poptag_0',
-        'B3-B3': 'jetprime_eGFP-SNF7_0',
-        'B4-B4': 'jetprime_eGFP-VPS60_0',
-        'B5-B5': 'jetprime_eGFP-CHMP1B_0',
-        'B6-B6': 'jetprime_mCherry-LIP5_0',
-        'B7-B7': 'jetprime_mCherry-VTA1_0',
-        'B8-B8': 'jetprime_mCherry-LIP5-VTA1_0',
-        'B9-B9': 'jetprime_mCherry-VTA1-LIP5_0',
-        'C2-C2': 'jetprime_eGFP-poptag_1',
-        'C3-C3': 'jetprime_eGFP-SNF7_1',
-        'C4-C4': 'jetprime_eGFP-VPS60_1',
-        'C5-C5': 'jetprime_eGFP-CHMP1B_1',
-        'C6-C6': 'jetprime_mCherry-LIP5_1',
-        'C7-C7': 'jetprime_mCherry-VTA1_1',
-        'C8-C8': 'jetprime_mCherry-LIP5-VTA1_1',
-        'C9-C9': 'jetprime_mCherry-VTA1-LIP5_1',
-        'E2-E2': 'lipo_eGFP-poptag_0',
-        'E3-E3': 'lipo_eGFP-SNF7_0',
-        'E4-E4': 'lipo_eGFP-VPS60_0',
-        'E5-E5': 'lipo_eGFP-CHMP1B_0',
-        'E6-E6': 'lipo_mCherry-LIP5_0',
-        'E7-E7': 'lipo_mCherry-VTA1_0',
-        'E8-E8': 'lipo_mCherry-LIP5-VTA1_0',
-        'E9-E9': 'lipo_mCherry-VTA1-LIP5_0',
-        'F2-F2': 'lipo_eGFP-poptag_1',
-        'F3-F3': 'lipo_eGFP-SNF7_1',
-        'F4-F4': 'lipo_eGFP-VPS60_1',
-        'F5-F5': 'lipo_eGFP-CHMP1B_1',
-        'F6-F6': 'lipo_mCherry-LIP5_1',
-        'F7-F7': 'lipo_mCherry-VTA1_1',
-        'F8-F8': 'lipo_mCherry-LIP5-VTA1_1',
-        'F9-F9': 'lipo_mCherry-VTA1-LIP5_1'
+        'B2-B2': 'jetprime_PopTag-co-mCherry_LIP5_0',
+        'B3-B3': 'jetprime_FREE1-co-mCherry_LIP5_0',
+        'B4-B4': 'jetprime_FLOE2-co-mCherry_LIP5_0',
+        'B5-B5': 'jetprime_FLOE3-co-mCherry_LIP5_0',
+        'B6-B6': 'jetprime_SKD1-co-mCherry_LIP5_0',
+        'B7-B7': 'jetprime_ISTL1-co-mCherry_LIP5_0',
+        'B8-B8': 'jetprime_SNF7-co-mCherry_LIP5_0',
+        'B9-B9': 'jetprime_VPS60-co-mCherry_LIP5_0',
+        'B10-B10': 'jetprime_eGFP-co-mCherry_LIP5_0',
+        'B11-B11': 'jetprime_noDNA_0',
+        'C2-C2': 'jetprime_PopTag-co-mCherry_LIP5_1',
+        'C3-C3': 'jetprime_FREE1-co-mCherry_LIP5_1',
+        'C4-C4': 'jetprime_FLOE2-co-mCherry_LIP5_1',
+        'C5-C5': 'jetprime_FLOE3-co-mCherry_LIP5_1',
+        'C6-C6': 'jetprime_SKD1-co-mCherry_LIP5_1',
+        'C7-C7': 'jetprime_ISTL1-co-mCherry_LIP5_1',
+        'C8-C8': 'jetprime_SNF7-co-mCherry_LIP5_1',
+        'C9-C9': 'jetprime_VPS60-co-mCherry_LIP5_1',
+        'C10-C10': 'jetprime_eGFP-co-mCherry_LIP5_1',
+        'C11-C11': 'jetprime_noDNA_1',
+        'E2-E2': 'lipo_PopTag-co-mCherry_LIP5_0',
+        'E3-E3': 'lipo_FREE1-co-mCherry_LIP5_0',
+        'E4-E4': 'lipo_FLOE2-co-mCherry_LIP5_0',
+        'E5-E5': 'lipo_FLOE3-co-mCherry_LIP5_0',
+        'E6-E6': 'lipo_SKD1-co-mCherry_LIP5_0',
+        'E7-E7': 'lipo_ISTL1-co-mCherry_LIP5_0',
+        'E8-E8': 'lipo_SNF7-co-mCherry_LIP5_0',
+        'E9-E9': 'lipo_VPS60-co-mCherry_LIP5_0',
+        'E10-E10': 'lipo_eGFP-co-mCherry_LIP5_0',
+        'E11-E11': 'lipo_noDNA_0',
+        'F2-F2': 'lipo_PopTag-co-mCherry_LIP5_1',
+        'F3-F3': 'lipo_FREE1-co-mCherry_LIP5_1',
+        'F4-F4': 'lipo_FLOE2-co-mCherry_LIP5_1',
+        'F5-F5': 'lipo_FLOE3-co-mCherry_LIP5_1',
+        'F6-F6': 'lipo_SKD1-co-mCherry_LIP5_1',
+        'F7-F7': 'lipo_ISTL1-co-mCherry_LIP5_1',
+        'F8-F8': 'lipo_SNF7-co-mCherry_LIP5_1',
+        'F9-F9': 'lipo_VPS60-co-mCherry_LIP5_1',
+        'F10-F10': 'lipo_eGFP-co-mCherry_LIP5_1',
+        'F11-F11': 'lipo_noDNA_1'
     }
 
     name_dict_1 = {
-        'B2-B2': 'jetprime_eGFP-poptag_0',
-        'B3-B3': 'jetprime_eGFP-FREE1_0',
-        'B4-B4': 'jetprime_eGFP-FLOE2_0',
-        'B5-B5': 'jetprime_eGFP-FLOE3_0',
-        'B6-B6': 'jetprime_eGFP-SKD1_0',
-        'B7-B7': 'jetprime_eGFP-ISTL1_0',
-        'B8-B8': 'jetprime_mCherry-LIP5_0',
-        'B9-B9': 'jetprime_mCherry-LIP5(Y-S)16_0',
-        'C2-C2': 'jetprime_eGFP-poptag_1',
-        'C3-C3': 'jetprime_eGFP-FREE1_1',
-        'C4-C4': 'jetprime_eGFP-FLOE2_1',
-        'C5-C5': 'jetprime_eGFP-FLOE3_1',
-        'C6-C6': 'jetprime_eGFP-SKD1_1',
-        'C7-C7': 'jetprime_eGFP-ISTL1_1',
-        'C8-C8': 'jetprime_mCherry-LIP5_1',
-        'C9-C9': 'jetprime_mCherry-LIP5(Y-S)16_1',
-        'E2-E2': 'lipo_eGFP-poptag_0',
-        'E3-E3': 'lipo_eGFP-FREE1_0',
-        'E4-E4': 'lipo_eGFP-FLOE2_0',
-        'E5-E5': 'lipo_eGFP-FLOE3_0',
-        'E6-E6': 'lipo_eGFP-SKD1_0',
-        'E7-E7': 'lipo_eGFP-ISTL1_0',
-        'E8-E8': 'lipo_mCherry-LIP5_0',
-        'E9-E9': 'lipo_mCherry-LIP5(Y-S)16_0',
-        'F2-F2': 'lipo_eGFP-poptag_1',
-        'F3-F3': 'lipo_eGFP-FREE1_1',
-        'F4-F4': 'lipo_eGFP-FLOE2_1',
-        'F5-F5': 'lipo_eGFP-FLOE3_1',
-        'F6-F6': 'lipo_eGFP-SKD1_1',
-        'F7-F7': 'lipo_eGFP-ISTL1_1',
-        'F8-F8': 'lipo_mCherry-LIP5_1',
-        'F9-F9': 'lipo_mCherry-LIP5(Y-S)16_1'
+        'B2-B2': 'jetprime_PopTag-co-mCherry_LIP5(Y-S)16_0',
+        'B3-B3': 'jetprime_FREE1-co-mCherry_LIP5(Y-S)16_0',
+        'B4-B4': 'jetprime_FLOE2-co-mCherry_LIP5(Y-S)16_0',
+        'B5-B5': 'jetprime_FLOE3-co-mCherry_LIP5(Y-S)16_0',
+        'B6-B6': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_0',
+        'B7-B7': 'jetprime_ISTL1-co-mCherry_LIP5(Y-S)16_0',
+        'B8-B8': 'jetprime_SNF7-co-mCherry_LIP5(Y-S)16_0',
+        'B9-B9': 'jetprime_VPS60-co-mCherry_LIP5(Y-S)16_0',
+        'B10-B10': 'jetprime_eGFP-co-mCherry_LIP5(Y-S)16_0',
+        'B11-B11': 'jetprime_noDNA_0',
+        'C2-C2': 'jetprime_PopTag-co-mCherry_LIP5(Y-S)16_1',
+        'C3-C3': 'jetprime_FREE1-co-mCherry_LIP5(Y-S)16_1',
+        'C4-C4': 'jetprime_FLOE2-co-mCherry_LIP5(Y-S)16_1',
+        'C5-C5': 'jetprime_FLOE3-co-mCherry_LIP5(Y-S)16_1',
+        'C6-C6': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_1',
+        'C7-C7': 'jetprime_ISTL1-co-mCherry_LIP5(Y-S)16_1',
+        'C8-C8': 'jetprime_SNF7-co-mCherry_LIP5(Y-S)16_1',
+        'C9-C9': 'jetprime_VPS60-co-mCherry_LIP5(Y-S)16_1',
+        'C10-C10': 'jetprime_eGFP-co-mCherry_LIP5(Y-S)16_1',
+        'C11-C11': 'jetprime_noDNA_1',
+        'E2-E2': 'lipo_PopTag-co-mCherry_LIP5(Y-S)16_0',
+        'E3-E3': 'lipo_FREE1-co-mCherry_LIP5(Y-S)16_0',
+        'E4-E4': 'lipo_FLOE2-co-mCherry_LIP5(Y-S)16_0',
+        'E5-E5': 'lipo_FLOE3-co-mCherry_LIP5(Y-S)16_0',
+        'E6-E6': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_0',
+        'E7-E7': 'lipo_ISTL1-co-mCherry_LIP5(Y-S)16_0',
+        'E8-E8': 'lipo_SNF7-co-mCherry_LIP5(Y-S)16_0',
+        'E9-E9': 'lipo_VPS60-co-mCherry_LIP5(Y-S)16_0',
+        'E10-E10': 'lipo_eGFP-co-mCherry_LIP5(Y-S)16_0',
+        'E11-E11': 'lipo_noDNA_0',
+        'F2-F2': 'lipo_PopTag-co-mCherry_LIP5(Y-S)16_1',
+        'F3-F3': 'lipo_FREE1-co-mCherry_LIP5(Y-S)16_1',
+        'F4-F4': 'lipo_FLOE2-co-mCherry_LIP5(Y-S)16_1',
+        'F5-F5': 'lipo_FLOE3-co-mCherry_LIP5(Y-S)16_1',
+        'F6-F6': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_1',
+        'F7-F7': 'lipo_ISTL1-co-mCherry_LIP5(Y-S)16_1',
+        'F8-F8': 'lipo_SNF7-co-mCherry_LIP5(Y-S)16_1',
+        'F9-F9': 'lipo_VPS60-co-mCherry_LIP5(Y-S)16_1',
+        'F10-F10': 'lipo_eGFP-co-mCherry_LIP5(Y-S)16_1',
+        'F11-F11': 'lipo_noDNA_1'
     }
 
     name_dict_2 = {
-        'E2-E2': 'jetprime_mCherry-LIP5(Y-S)16_0',
-        'E3-E3': 'jetprime_mCherry-VTA1-LIP5_0',
-        'E4-E4': 'jetprime_mCherry-LIP5-VTA1_0',
-        'E5-E5': 'jetprime_eGFP-VPS60_0',
-        'E6-E6': 'jetprime_eGFP-SKD1_0',
-        'E7-E7': 'lipo_mCherry-LIP5(Y-S)16_0',
-        'E8-E8': 'lipo_mCherry-VTA1-LIP5_0',
-        'E9-E9': 'lipo_mCherry-LIP5-VTA1_0',
-        'E10-E10': 'lipo_eGFP-VPS60_0',
-        'E11-E11': 'lipo_eGFP-SKD1_0',
-        'F2-F2': 'jetprime_mCherry-LIP5(Y-S)16_1',
-        'F3-F3': 'jetprime_mCherry-VTA1-LIP5_1',
-        'F4-F4': 'jetprime_mCherry-LIP5-VTA1_1',
-        'F5-F5': 'jetprime_eGFP-VPS60_1',
-        'F6-F6': 'jetprime_eGFP-SKD1_1',
-        'F7-F7': 'lipo_mCherry-LIP5(Y-S)16_1',
-        'F8-F8': 'lipo_mCherry-VTA1-LIP5_1',
-        'F9-F9': 'lipo_mCherry-LIP5-VTA1_1',
-        'F10-F10': 'lipo_eGFP-VPS60_1',
-        'F11-F11': 'lipo_eGFP-SKD1_1'
-    } 
+        'B2-B2': 'jetprime_SKD1-co-mCherry_LIP5_0',
+        'B3-B3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_0',
+        'B4-B4': 'lipo_SKD1-co-mCherry_LIP5_0',
+        'B5-B5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_0',
+        'B6-B6': 'jetprime_SKD1-co-mCherry_LIP5_0',
+        'B7-B7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_0',
+        'C2-C2': 'jetprime_SKD1-co-mCherry_LIP5_1',
+        'C3-C3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_1',
+        'C4-C4': 'lipo_SKD1-co-mCherry_LIP5_1',
+        'C5-C5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_1',
+        'C6-C6': 'jetprime_SKD1-co-mCherry_LIP5_1',
+        'C7-C7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_1',        
+        'D2-D2': 'jetprime_SKD1-co-mCherry_LIP5_2',
+        'D3-D3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_2',
+        'D4-D4': 'lipo_SKD1-co-mCherry_LIP5_2',
+        'D5-D5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_2',
+        'D6-D6': 'jetprime_SKD1-co-mCherry_LIP5_2',
+        'D7-D7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_2',
+        'E2-E2': 'jetprime_SKD1-co-mCherry_LIP5_3',
+        'E3-E3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_3',
+        'E4-E4': 'lipo_SKD1-co-mCherry_LIP5_3',
+        'E5-E5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_3',
+        'E6-E6': 'jetprime_SKD1-co-mCherry_LIP5_3',
+        'E7-E7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_3',
+    }
 
-    batch_0 = ['2026-03-30', '2026-03-31']
-    batch_1 = ['2026-04-01', '2026-04-02']
-    batch_2 = ['2026-04-16', '2026-04-17']
+    batch_0 = ['2026-04-10', '2026-04-11']
+    batch_1 = ['2026-04-14', '2026-04-15', '2026-04-16', '2026-04-17']
+    batch_2 = ['2026-04-24a', '2026-04-24b']
 
     # analyze for each batch and name_dict
     for name_dict, batch in zip([name_dict_0, name_dict_1, name_dict_2], [batch_0, batch_1, batch_2]):
@@ -388,12 +416,12 @@ if __name__ == '__main__':
             flat_file_list = [item for sublist in file_list for item in sublist if any(sub in item for sub in image_extensions)]
 
         # remove images that do not require analysis (e.g., qualitative controls)
-        do_not_quantitate = ['_no-', 'noDNA', 'UT', 'test', 'fewcells', 'poorfocus', 'co_'] 
+        do_not_quantitate = ['_no-', 'noDNA', 'UT', 'test', 'fewcells', 'poorfocus'] 
         image_names = [filename for filename in flat_file_list if not any(word in filename for word in do_not_quantitate)]
 
         # remove duplicates
         image_names = list(dict.fromkeys(image_names))
-        image_names = [name for name in image_names if '(' in name] # keep only images with parentheses in name, which indicates they are from multi-scene acquisitions and need to be split
+        image_names = [name for name in image_names if '(' in name and 'co_' in name] # keep only images with parentheses in name, which indicates they are from multi-scene acquisitions and need to be split
 
         # --------------- collect image names and convert ---------------
         # collect and convert images to np arrays
