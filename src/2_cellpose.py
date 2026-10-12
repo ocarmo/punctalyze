@@ -129,25 +129,25 @@ if __name__ == '__main__':
     images_dict = {filename.replace('.npy', ''): np.load(
         f'{image_folder}{filename}') for filename in file_list}
 
-    # ---------------- prepare images ----------------
-    # Cellpose-SAM will use the first 3 channels of your image, truncating the rest. It has been trained with the cytoplasm and nuclear channels in any order, with the other channel set to zero.
-    # you can combine two stains to create your "cytoplasm" channel
-    # in this example indices 0 and 1 (1st and 2nd) have two cellular stains, and nuclei are in index 2 (3rd channel)
-    # subtract one image from another to reduce background and improve segmentation
-    imgs_cp = {
-        name: np.stack((img[[0, 1]].sum(axis=0), img[2], np.maximum(img[-1].astype(np.int32) - img[0].astype(np.int32), 0).astype(np.uint16)), axis=0)
-        for name, img in images_dict.items()
-    }
+    # # ---------------- prepare images ----------------
+    # # Cellpose-SAM will use the first 3 channels of your image, truncating the rest. It has been trained with the cytoplasm and nuclear channels in any order, with the other channel set to zero.
+    # # you can combine two stains to create your "cytoplasm" channel
+    # # in this example indices 0 and 1 (1st and 2nd) have two cellular stains, and nuclei are in index 2 (3rd channel)
+    # # subtract one image from another to reduce background and improve segmentation
+    # imgs_cp = {
+    #     name: np.stack((img[1], img[2], np.maximum(img[-1].astype(np.int32) - img[0].astype(np.int32), 0).astype(np.uint16)), axis=0)
+    #     for name, img in images_dict.items()
+    # }
 
-    # preprocessing for segmenting cells from a puncta only channel - will blur the puncta and log transform to enhance the cell borders, but will not work well if the puncta are very bright and large
-    imgs_cp_test = {
-        name: np.stack([
-            (np.log1p(filters.gaussian(ch.astype(np.float32), sigma=1, preserve_range=True)) /
-            np.log1p(filters.gaussian(ch.astype(np.float32), sigma=1, preserve_range=True).max()) * 65535).astype(np.uint16)
-            for ch in img
-        ], axis=0)
-        for name, img in imgs_cp.items()
-    } 
+    # # preprocessing for segmenting cells from a puncta only channel - will blur the puncta and log transform to enhance the cell borders, but will not work well if the puncta are very bright and large
+    # imgs_cp = {
+    #     name: np.stack([
+    #         (np.log1p(filters.gaussian(ch.astype(np.float32), sigma=1, preserve_range=True)) /
+    #         np.log1p(filters.gaussian(ch.astype(np.float32), sigma=1, preserve_range=True).max()) * 65535).astype(np.uint16)
+    #         for ch in img[:-1]
+    #     ], axis=0)
+    #     for name, img in imgs_cp.items()
+    # } 
 
     # ---------------- check existing masks ----------------
     existing_masks = {
@@ -161,14 +161,17 @@ if __name__ == '__main__':
     # ---------------- apply cellpose ----------------
     model = models.CellposeModel(model_type='sam', gpu=True)
 
-    for name, img in imgs_cp.items():
+    # TODO: change images_dict to imgs_cp dictionary
+    for name, img in images_dict.items():
         name
         if name in existing_masks:
             logger.info(f'skipping {name}, mask already exists.')
             continue
-
+        
+        # optional: remove one channel from another
+        img = np.stack((img[1], np.maximum(img[-1].astype(np.int32) - img[0].astype(np.int32), 0).astype(np.uint16)), axis=0)
+        
         logger.info(f'processing {name}...')
-
         masks, flows, styles = apply_cellpose(
             [img],
             niter=2000,
