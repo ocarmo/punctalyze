@@ -365,6 +365,12 @@ if __name__ == '__main__':
 
         cell_mask = mask[0]
 
+        # --- wrangle channels to match expected input for saturation check ---
+        if 'mCh' in name:
+            image = np.stack([image[COI_2], image[COI_1]])
+        else:
+            image = np.stack([image[COI_1], image[COI_2]])
+
         # --- filter ---
         filtered_img = filter_saturated_images(
             {name: image}, 
