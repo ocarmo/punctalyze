@@ -61,6 +61,18 @@ def max_project(image):
     else:
         return image
 
+def max_project(image):
+    """
+    Applies max projection if Z exists. Helper for scene_finder and scene_splitter functions.
+    Assumes (C, Z, Y, X) or (Z, Y, X)
+    """
+    if image.ndim == 4:
+        return np.max(image, axis=1)  # (C, Z, Y, X) → (C, Y, X)
+    elif image.ndim == 3:
+        return np.max(image, axis=0)  # (Z, Y, X) → (Y, X)
+    else:
+        return image
+
 # function for multi-scene data
 def scene_splitter(image_path, names_mapped, MIP=False):
     """Split scenes in multi scene acquisitions

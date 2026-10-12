@@ -240,10 +240,11 @@ def collect_features(image_dict):
             df['cell_coords'] = [contour] * len(df)
 
             results.append(df)
-
+    
     if not results:
-        return pd.DataFrame()
+        return pd.DataFrame()   
 
+    # logger.info('feature extraction done')
     return pd.concat(results, ignore_index=True)
 
 
