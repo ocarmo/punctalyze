@@ -2,442 +2,282 @@
 Import data as numpy array
 """
 
-import os
+import re
+from pathlib import Path
 import numpy as np
 from loguru import logger
 from bioio import BioImage
-from bioio.writers import OmeTiffWriter
 from aicspylibczi import CziFile
+from pathlib import Path
 import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
-import bioio_ome_tiff
-import bioio_nd2
 
-logger.info('import ok')
+# ====================== USER CONFIGURATION ======================
+# Paths and experiments
+input_path = Path('M:/Olivia')
+output_folder = Path('results/initial_cleanup')
+experiments = ['2026-04-10']  # List of folders; None = all
+image_extensions = {'.czi', '.tif', '.tiff', '.lif', '.nd2'}
 
-# configuration
-input_path = 'M:/Olivia'
-output_folder = 'results/initial_cleanup/'
-image_extensions = ['.czi', '.tif', '.tiff', '.lif', '.nd2']
+# Well-to-sample mappings (for multi-well acquisitions)
+set1 = {
+    'B2-B2': 'jetprime_PopTag-co-mCherry_LIP5_0',
+    'B3-B3': 'jetprime_FREE1-co-mCherry_LIP5_0',
+    'B4-B4': 'jetprime_FLOE2-co-mCherry_LIP5_0',
+    'B5-B5': 'jetprime_FLOE3-co-mCherry_LIP5_0',
+}
+set2 = {
+    'B2-B2': 'jetprime_PopTag-co-mCherry_0',
+    'B3-B3': 'jetprime_FREE1-co-mCherry_0',
+    'B4-B4': 'jetprime_FLOE2-co-mCherry_0',
+    'B5-B5': 'jetprime_FLOE3-co-mCherry_0',
+}
+experiment_mappings = {
+    '2026-04-10': set1,
+    '2026-04-11': set1,
+    '2026-04-14': set2,
+    '2026-04-15': set2,
+}
+default_mapping = None  # Fallback for unlisted experiments
+
+# Image processing
+scene_mode = 'mosaic'     # 'auto', 'mosaic', 'split', 'single'
+MIP = True               # Maximum Z projection
+experiment_prefix = True # Prefix output filenames with experiment
+skip_existing = True     # False = overwrite existing files
+
+# File filtering
+do_not_quantitate = ['_no-', 'noDNA', 'UT', 'test', 'fewcells', 'poorfocus']
+required_name_parts = ['(', 'co_']  # [] = no restrictions
+# ================================================================
 
 
-def squarify(image_stack):
-    """
-    Pads Y/X to square.
-    Supports:
-    (C, Y, X) or (C, Z, Y, X)
-    """
-    if image_stack.ndim not in (3, 4):
-        raise ValueError(f"Unsupported shape: {image_stack.shape}")
-
-    # Always operate on last two dims (Y, X)
-    y, x = image_stack.shape[-2:]
-    max_dim = max(y, x)
-
-    pad_y = max_dim - y
-    pad_x = max_dim - x
-
-    pad_width = [(0, 0)] * image_stack.ndim
-    pad_width[-2] = (0, pad_y)
-    pad_width[-1] = (0, pad_x)
-
-    return np.pad(
-        image_stack,
-        pad_width,
-        mode='constant',
-        constant_values=0
-    )
+def squarify(image):
+    """Zero-pad final Y/X axes to square; expects CYX or CZYX."""
+    if image.ndim not in (3, 4):
+        raise ValueError(f'Expected CYX or CZYX, got {image.shape}')
+    height, width = image.shape[-2:]
+    pads = [(0, 0)] * (image.ndim - 2) + [(0, max(0, width - height)),
+                                             (0, max(0, height - width))]
+    return np.pad(image, pads, mode='constant')
 
 
-def max_project(image):
-    """
-    Applies max projection if Z exists. Helper for scene_finder and scene_splitter functions.
-    Assumes (C, Z, Y, X) or (Z, Y, X)
-    """
-    if image.ndim == 4:
-        return np.max(image, axis=1)  # (C, Z, Y, X) → (C, Y, X)
-    elif image.ndim == 3:
-        return np.max(image, axis=0)  # (Z, Y, X) → (Y, X)
+def finish_image(data, mip):
+    """Input CZYX; output CYX (MIP) or CZYX (no MIP)."""
+    if data.ndim != 4:
+        raise ValueError(f'Expected CZYX, got {data.shape}')
+    return squarify(data.max(axis=1) if mip else data)
+
+
+def experiment_label(path, root):
+    rel = path.resolve().relative_to(root.resolve())
+    return rel.parts[0] if len(rel.parts) > 1 else root.name
+
+
+def safe_name(name):
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', str(name)).strip(' .')
+    if not name:
+        raise ValueError('Empty output name')
+    return name
+
+
+def save_array(data, out, skip=True):
+    if out.exists():
+        if skip:
+            logger.info(f'Skipping existing {out}')
+            return out
+        raise FileExistsError(f'Output already exists: {out}')
+    np.save(out, data)
+    logger.info(f'Saved {out.name}: {data.shape}, {data.dtype}')
+    return out
+
+
+def mapped_name(scene, mapping, fallback):
+    if mapping is None:
+        return fallback
+    if scene not in mapping:
+        logger.warning(f'No mapping for scene {scene!r}; skipping')
+        return None
+    return mapping[scene]
+
+
+def output_name(path, label, scene, mapping, prefix, *, single=False):
+    # Include acquisition filename for non-mapped scenes to avoid identical scene IDs
+    # across files; mapped names intentionally preserve the established convention.
+    fallback = path.stem if single else f'{path.stem}_{scene}'
+    name = mapped_name(scene, mapping, fallback)
+    if name is None:
+        return None
+    return safe_name(f'{label}_{name}' if prefix else name)
+
+
+def scene_splitter(path, outdir, label, mapping=None, mip=False, prefix=True,
+                   skip=True):
+    """Save each independent scene without mosaic stitching."""
+    bio = BioImage(str(path))
+    outputs = []
+    for scene in bio.scenes:
+        name = output_name(path, label, scene, mapping, prefix)
+        if name is None:
+            continue
+        out = outdir / f'{name}.npy'
+        if skip and out.exists():
+            logger.info(f'Skipping existing {out}')
+            continue
+        bio.set_scene(scene)
+        # T=0 matches the original workflow; other timepoints require explicit handling.
+        data = bio.get_image_data('CZYX', T=0)
+        outputs.append(save_array(finish_image(data, mip), out, skip))
+    return outputs
+
+
+def _mosaic_plane(czi, c, z, scene_index=0):
+    """Read one stitched C/Z plane; require unambiguous 2D output."""
+    kwargs = {'C': c, 'Z': z, 'scale_factor': 1.0}
+    # A single-scene CZI generally needs no S argument.
+    # Multi-scene mosaics require explicit scene handling, not silent mixing.
+    plane = np.asarray(czi.read_mosaic(**kwargs))
+    # Verified Zeiss example: (1, 1, 3892, 3892) -> (3892, 3892).
+    plane = np.squeeze(plane)
+    if plane.ndim != 2:
+        raise ValueError(f'read_mosaic(C={c}, Z={z}) returned {plane.shape}; expected 2D')
+    return plane
+
+
+def scene_finder(path, outdir, label, mapping=None, mip=False, prefix=True,
+                 skip=True):
+    """Stitch a single-scene Zeiss CZI mosaic across all C and Z planes."""
+    bio = BioImage(str(path))
+    if len(bio.scenes) != 1:
+        raise ValueError(f'Mosaic file has {len(bio.scenes)} scenes; '
+                         'this reader currently supports one scene per file')
+    scene = bio.scenes[0]
+    name = output_name(path, label, scene, mapping, prefix)
+    if name is None:
+        return []
+    out = outdir / f'{name}.npy'
+    if skip and out.exists():
+        logger.info(f'Skipping existing {out}')
+        return [out]
+    czi = CziFile(str(path))
+    if not czi.is_mosaic():
+        raise ValueError(f'Not a Zeiss mosaic: {path}')
+    shapes = czi.get_dims_shape()
+    if len(shapes) != 1:
+        raise ValueError(f'Ambiguous CZI dimension ranges: {shapes}')
+    dims = shapes[0]
+    for axis in ('C', 'Z'):
+        if axis not in dims:
+            raise ValueError(f'Missing {axis} dimension: {dims}')
+    # Explicitly reject unhandled timepoints/other variable dimensions.
+    for axis in ('T', 'S', 'H'):
+        start, end = dims.get(axis, (0, 1))
+        if end - start > 1:
+            raise ValueError(f'Unsupported multi-{axis} mosaic: {dims}')
+    c0, c1 = dims['C']
+    z0, z1 = dims['Z']
+    channels = []
+    for c in range(c0, c1):
+        if mip:
+            projected = None
+            for z in range(z0, z1):
+                plane = _mosaic_plane(czi, c, z)
+                if projected is None:
+                    projected = plane.copy()
+                else:
+                    if plane.shape != projected.shape:
+                        raise ValueError(f'Mosaic plane shapes differ in channel {c}')
+                    np.maximum(projected, plane, out=projected)
+            channels.append(projected)
+        else:
+            planes = [_mosaic_plane(czi, c, z) for z in range(z0, z1)]
+            if len({p.shape for p in planes}) != 1:
+                raise ValueError(f'Mosaic plane shapes differ in channel {c}')
+            channels.append(np.stack(planes, axis=0))
+    if len({arr.shape for arr in channels}) != 1:
+        raise ValueError('Mosaic channel shapes differ')
+    data = np.stack(channels, axis=0)  # CYX if MIP; otherwise CZYX
+    return [save_array(squarify(data), out, skip)]
+
+
+def image_converter(path, outdir, label, mapping=None, mode='auto', mip=False,
+                    prefix=True, skip=True):
+    """Dispatch to mosaic stitching, independent-scene splitting, or normal reading."""
+    path = Path(path)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    if mode not in {'auto', 'mosaic', 'split', 'single'}:
+        raise ValueError(f'Invalid scene_mode: {mode}')
+    if mode == 'auto':
+        if path.suffix.lower() == '.czi' and CziFile(str(path)).is_mosaic():
+            mode = 'mosaic'
+        else:
+            bio = BioImage(str(path))
+            mode = 'split' if len(bio.scenes) > 1 else 'single'
+    if mode == 'mosaic':
+        if path.suffix.lower() != '.czi':
+            raise ValueError('Mosaic mode requires a .czi file')
+        return scene_finder(path, outdir, label, mapping, mip, prefix, skip)
+    if mode == 'split':
+        return scene_splitter(path, outdir, label, mapping, mip, prefix, skip)
+    bio = BioImage(str(path))
+    if len(bio.scenes) != 1:
+        raise ValueError(f'Single mode requires one scene, found {len(bio.scenes)}')
+    scene = bio.scenes[0]
+    name = output_name(path, label, scene, mapping, prefix, single=True)
+    if name is None:
+        return []
+    out = outdir / f'{name}.npy'
+    if skip and out.exists():
+        logger.info(f'Skipping existing {out}')
+        return [out]
+    data = bio.get_image_data('CZYX', T=0)
+    return [save_array(finish_image(data, mip), out, skip)]
+
+
+def discover_images(root, selected, extensions, exclude, required):
+    """Discover experiment images, avoiding recursive duplicate scans."""
+    root = Path(root)
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+    if selected is None:
+        folders = sorted(p for p in root.iterdir() if p.is_dir())
+        # Allow a flat raw_data directory as well.
+        if not folders:
+            folders = [root]
     else:
-        return image
-
-def max_project(image):
-    """
-    Applies max projection if Z exists. Helper for scene_finder and scene_splitter functions.
-    Assumes (C, Z, Y, X) or (Z, Y, X)
-    """
-    if image.ndim == 4:
-        return np.max(image, axis=1)  # (C, Z, Y, X) → (C, Y, X)
-    elif image.ndim == 3:
-        return np.max(image, axis=0)  # (Z, Y, X) → (Y, X)
-    else:
-        return image
-
-# function for multi-scene data
-def scene_splitter(image_path, names_mapped, MIP=False):
-    """Split scenes in multi scene acquisitions
-    """
-
-    # get a bioimage object
-    bio_image = BioImage(image_path)
-
-    # get and save scenes
-    for id in bio_image.scenes:
-        id
-        bio_image.set_scene(id)
-        restack = np.stack(bio_image.data[0,:,0,:,:])
-        # make scene x and y dimensions the same (sometimes off by one pixel)
-        restack = squarify(restack)
-        if MIP:
-            restack = max_project(restack)
-        np.save(f'{output_folder}{name}.npy', restack)        # find matching name
-        name = names_mapped[id]
-        # save image as numpy array
-        np.save(f'{output_folder}{name}.npy', restack)
-
-
-def normalize_dims(data, dims):
-    """
-    Normalize to (C, Z, M, Y, X)
-    Works with CziFile dims format: [('C', size), ...]
-    """
-
-    # Extract just dimension names
-    dim_names = [d[0] for d in dims]
-
-    # Build map
-    dim_map = {dim: i for i, dim in enumerate(dim_names)}
-
-    # Full axis order (keep everything, just reorder)
-    full_order = list(range(len(dim_names)))
-
-    # Move target dims to the front in correct order
-    target = ['C', 'Z', 'M', 'Y', 'X']
-    front_axes = [dim_map[d] for d in target if d in dim_map]
-
-    # Keep remaining dims (H, S, T, etc.)
-    remaining_axes = [i for i in full_order if i not in front_axes]
-
-    new_order = front_axes + remaining_axes
-
-    # Move desired dims to front
-    data = np.transpose(data, axes=new_order)
-
-    # Collapse all extra dims (H, S, T, etc.)
-    data = data.reshape(
-        data.shape[0],  # C
-        data.shape[1],  # Z
-        data.shape[2],  # M
-        data.shape[3],  # Y
-        data.shape[4],  # X
-    )
-
-    # Remove trailing singleton dims
-    data = np.squeeze(data, axis=tuple(range(5, data.ndim)))
-
-    return data
-
-
-# function for multi-scene data
-def scene_finder(image_path, names_mapped, experiment_prefix=True, MIP=False):
-    """Find and stitch scenes in multi-scene acquisitions (dimension-safe)"""
-
-    czi = CziFile(image_path)
-    data, dims = czi.read_image(return_dims=True)
-
-    # Normalize to (C, Z, M, Y, X)
-    data = normalize_dims(data, dims)
-
-    # Unpack dimensions explicitly
-    n_channels, n_z, n_tiles, tile_h, tile_w = data.shape
-
-    # Get tile bounding boxes
-    bboxes = czi.get_all_mosaic_tile_bounding_boxes()
-
-    # Filter valid tiles
-    tile_positions = []
-    for tile_info, rect in bboxes.items():
-        if tile_info.m_index < n_tiles:
-            tile_positions.append((tile_info.m_index, rect))
-
-    # Sort tiles
-    tile_positions.sort(key=lambda x: x[0])
-
-    # Normalize coordinates
-    xs = [rect.x for _, rect in tile_positions]
-    ys = [rect.y for _, rect in tile_positions]
-
-    min_x, min_y = min(xs), min(ys)
-    xs = [x - min_x for x in xs]
-    ys = [y - min_y for y in ys]
-
-    # Canvas size
-    canvas_w = max(xs) + tile_w
-    canvas_h = max(ys) + tile_h
-
-    # Initialize stitched array (C, Z, Y, X)
-    stitched = np.zeros((n_channels, n_z, canvas_h, canvas_w), dtype=data.dtype)
-
-    # Stitch tiles
-    for (m_index, rect), x, y in zip(tile_positions, xs, ys):
-        stitched[:, :, y:y+tile_h, x:x+tile_w] = data[:, :, m_index, :, :]
-
-    # Squarify
-    stitched = squarify(stitched)
-
-    # Optional MIP
-    if MIP:
-        stitched = max_project(stitched)
-
-    # Map scene name
-    bio_image = BioImage(image_path)
-    well_name = bio_image.current_scene
-    if well_name not in names_mapped.keys():
-        logger.warning(f'No mapping found for scene {well_name} in {image_path}. Skipping save.')
-        return
-    well_id = names_mapped[well_name]
-
-    if experiment_prefix:
-        prefix = image_path.split('\\')[-1].split('/')[0]  # e.g., '2026-03-31'
-        well_id = f'{prefix}_{well_id}'
-
-    if any(word in well_id for word in do_not_quantitate):
-        logger.info(f'Skipping {well_id} due to do_not_quantitate criteria')
-        return
-    
-    # if image already exists in ouptut folder, skip
-    if os.path.exists(f'{output_folder}{well_id}.npy'):
-        logger.info(f'Skipping {well_id}, file already exists in output folder.')
-        return
-
-    np.save(f'{output_folder}{well_id}.npy', stitched)
-
-
-def image_converter(image_path, output_folder, tiff=False, MIP=False, array=True, split_scenes=False, find_scenes=False, name_dict=None, experiment_prefix=False):
-    """Stack images from nested .czi files and save for subsequent processing
-
-    Args:
-        image_path (str): filepath for the image to be converted
-        output_folder (str): filepath for saving the converted images
-        tiff (bool, optional): Save tiff. Defaults to False.
-        MIP (bool, optional): Save np array as maximum projected image along third to last axis. Defaults to False.
-        array (bool, optional): Save np array. Defaults to True.
-        split_scenes (bool, optional): Split scenes. Defaults to False.
-        find_scenes (bool, optional): Find scenes. Defaults to False.
-        names_mapped (dict, optional): Dictionary mapping scene names to desired output names. Required if split_scenes or find_scenes is True. Defaults to None.
-        experiment_prefix (bool, optional): Whether to include experiment prefix in output name. Defaults to False.
-    """
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-    
-    # check if image exists
-    full_path = None
-    if os.path.exists(image_path):
-        full_path = image_path
-
-    if full_path is None:
-        logger.warning(f'File not found for {image_path}')
-        return
-    
-    if split_scenes == True:
-        scene_splitter(image_path, name_dict, experiment_prefix=experiment_prefix, MIP=MIP)
-        return
-    
-    if find_scenes == True:
-        scene_finder(image_path, name_dict, experiment_prefix=experiment_prefix, MIP=MIP)
-        return
-
-    # get a bioimage object
-    bio_image = BioImage(full_path)
-    image_shape = bio_image.dims
-
-    # import single channel timeseries
-    if (image_shape['T'][0] > 1) & (image_shape['C'][0] == 1):
-        image = bio_image.get_image_data("TYX", C=0, Z=0)
-
-    # import multichannel timeseries
-    if (image_shape['T'][0] > 1) & (image_shape['C'][0] > 1):
-        image = bio_image.get_image_data("CTYX", B=0, Z=0, V=0)
-
-    # import multichannel z-stack
-    if image_shape['Z'][0] > 1:
-        image = bio_image.get_image_data("CZYX", B=0, V=0, T=0)
-
-    # import multichannel single z-slice single timepoint
-    if (image_shape['Z'][0] == 1) & (image_shape['T'][0] == 1) & (image_shape['C'][0] > 1):
-        image = bio_image.get_image_data("CYX", B=0, Z=0, V=0, T=0)
-
-    # make more human readable name
-    short_name = image_path.split('\\')[1].replace('/', '_') # keep experiment name
-    short_name = short_name.split('.')[0]  # remove file extension
-
-    if tiff == True:
-        # save image as tiff file
-        OmeTiffWriter.save(image, f'{output_folder}{short_name}.tif')
-
-    if array == True:
-        # save image as numpy array
-        np.save(f'{output_folder}{short_name}.npy', image)
-
-    if MIP == True:
-        # save image as maximum intensity projection (MIP) numpy array 
-        mip_image = max_project(image)
-        np.save(f'{output_folder}{short_name}_mip.npy', mip_image)
+        folders = [root / name for name in selected]
+    found = {}
+    for folder in folders:
+        if not folder.is_dir():
+            logger.warning(f'Missing experiment folder: {folder}')
+            continue
+        for path in folder.rglob('*'):
+            if not path.is_file() or path.suffix.lower() not in extensions:
+                continue
+            if any(term in str(path) for term in exclude):
+                continue
+            if not all(term in path.name for term in required):
+                continue
+            found[path.resolve()] = (experiment_label(path, root), path)
+    return [found[key] for key in sorted(found)]
 
 
 if __name__ == '__main__':
-    
-    # --------------- dictionary of sample names ---------------
-    name_dict_0 = {
-        'B2-B2': 'jetprime_PopTag-co-mCherry_LIP5_0',
-        'B3-B3': 'jetprime_FREE1-co-mCherry_LIP5_0',
-        'B4-B4': 'jetprime_FLOE2-co-mCherry_LIP5_0',
-        'B5-B5': 'jetprime_FLOE3-co-mCherry_LIP5_0',
-        'B6-B6': 'jetprime_SKD1-co-mCherry_LIP5_0',
-        'B7-B7': 'jetprime_ISTL1-co-mCherry_LIP5_0',
-        'B8-B8': 'jetprime_SNF7-co-mCherry_LIP5_0',
-        'B9-B9': 'jetprime_VPS60-co-mCherry_LIP5_0',
-        'B10-B10': 'jetprime_eGFP-co-mCherry_LIP5_0',
-        'B11-B11': 'jetprime_noDNA_0',
-        'C2-C2': 'jetprime_PopTag-co-mCherry_LIP5_1',
-        'C3-C3': 'jetprime_FREE1-co-mCherry_LIP5_1',
-        'C4-C4': 'jetprime_FLOE2-co-mCherry_LIP5_1',
-        'C5-C5': 'jetprime_FLOE3-co-mCherry_LIP5_1',
-        'C6-C6': 'jetprime_SKD1-co-mCherry_LIP5_1',
-        'C7-C7': 'jetprime_ISTL1-co-mCherry_LIP5_1',
-        'C8-C8': 'jetprime_SNF7-co-mCherry_LIP5_1',
-        'C9-C9': 'jetprime_VPS60-co-mCherry_LIP5_1',
-        'C10-C10': 'jetprime_eGFP-co-mCherry_LIP5_1',
-        'C11-C11': 'jetprime_noDNA_1',
-        'E2-E2': 'lipo_PopTag-co-mCherry_LIP5_0',
-        'E3-E3': 'lipo_FREE1-co-mCherry_LIP5_0',
-        'E4-E4': 'lipo_FLOE2-co-mCherry_LIP5_0',
-        'E5-E5': 'lipo_FLOE3-co-mCherry_LIP5_0',
-        'E6-E6': 'lipo_SKD1-co-mCherry_LIP5_0',
-        'E7-E7': 'lipo_ISTL1-co-mCherry_LIP5_0',
-        'E8-E8': 'lipo_SNF7-co-mCherry_LIP5_0',
-        'E9-E9': 'lipo_VPS60-co-mCherry_LIP5_0',
-        'E10-E10': 'lipo_eGFP-co-mCherry_LIP5_0',
-        'E11-E11': 'lipo_noDNA_0',
-        'F2-F2': 'lipo_PopTag-co-mCherry_LIP5_1',
-        'F3-F3': 'lipo_FREE1-co-mCherry_LIP5_1',
-        'F4-F4': 'lipo_FLOE2-co-mCherry_LIP5_1',
-        'F5-F5': 'lipo_FLOE3-co-mCherry_LIP5_1',
-        'F6-F6': 'lipo_SKD1-co-mCherry_LIP5_1',
-        'F7-F7': 'lipo_ISTL1-co-mCherry_LIP5_1',
-        'F8-F8': 'lipo_SNF7-co-mCherry_LIP5_1',
-        'F9-F9': 'lipo_VPS60-co-mCherry_LIP5_1',
-        'F10-F10': 'lipo_eGFP-co-mCherry_LIP5_1',
-        'F11-F11': 'lipo_noDNA_1'
-    }
-
-    name_dict_1 = {
-        'B2-B2': 'jetprime_PopTag-co-mCherry_LIP5(Y-S)16_0',
-        'B3-B3': 'jetprime_FREE1-co-mCherry_LIP5(Y-S)16_0',
-        'B4-B4': 'jetprime_FLOE2-co-mCherry_LIP5(Y-S)16_0',
-        'B5-B5': 'jetprime_FLOE3-co-mCherry_LIP5(Y-S)16_0',
-        'B6-B6': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_0',
-        'B7-B7': 'jetprime_ISTL1-co-mCherry_LIP5(Y-S)16_0',
-        'B8-B8': 'jetprime_SNF7-co-mCherry_LIP5(Y-S)16_0',
-        'B9-B9': 'jetprime_VPS60-co-mCherry_LIP5(Y-S)16_0',
-        'B10-B10': 'jetprime_eGFP-co-mCherry_LIP5(Y-S)16_0',
-        'B11-B11': 'jetprime_noDNA_0',
-        'C2-C2': 'jetprime_PopTag-co-mCherry_LIP5(Y-S)16_1',
-        'C3-C3': 'jetprime_FREE1-co-mCherry_LIP5(Y-S)16_1',
-        'C4-C4': 'jetprime_FLOE2-co-mCherry_LIP5(Y-S)16_1',
-        'C5-C5': 'jetprime_FLOE3-co-mCherry_LIP5(Y-S)16_1',
-        'C6-C6': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_1',
-        'C7-C7': 'jetprime_ISTL1-co-mCherry_LIP5(Y-S)16_1',
-        'C8-C8': 'jetprime_SNF7-co-mCherry_LIP5(Y-S)16_1',
-        'C9-C9': 'jetprime_VPS60-co-mCherry_LIP5(Y-S)16_1',
-        'C10-C10': 'jetprime_eGFP-co-mCherry_LIP5(Y-S)16_1',
-        'C11-C11': 'jetprime_noDNA_1',
-        'E2-E2': 'lipo_PopTag-co-mCherry_LIP5(Y-S)16_0',
-        'E3-E3': 'lipo_FREE1-co-mCherry_LIP5(Y-S)16_0',
-        'E4-E4': 'lipo_FLOE2-co-mCherry_LIP5(Y-S)16_0',
-        'E5-E5': 'lipo_FLOE3-co-mCherry_LIP5(Y-S)16_0',
-        'E6-E6': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_0',
-        'E7-E7': 'lipo_ISTL1-co-mCherry_LIP5(Y-S)16_0',
-        'E8-E8': 'lipo_SNF7-co-mCherry_LIP5(Y-S)16_0',
-        'E9-E9': 'lipo_VPS60-co-mCherry_LIP5(Y-S)16_0',
-        'E10-E10': 'lipo_eGFP-co-mCherry_LIP5(Y-S)16_0',
-        'E11-E11': 'lipo_noDNA_0',
-        'F2-F2': 'lipo_PopTag-co-mCherry_LIP5(Y-S)16_1',
-        'F3-F3': 'lipo_FREE1-co-mCherry_LIP5(Y-S)16_1',
-        'F4-F4': 'lipo_FLOE2-co-mCherry_LIP5(Y-S)16_1',
-        'F5-F5': 'lipo_FLOE3-co-mCherry_LIP5(Y-S)16_1',
-        'F6-F6': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_1',
-        'F7-F7': 'lipo_ISTL1-co-mCherry_LIP5(Y-S)16_1',
-        'F8-F8': 'lipo_SNF7-co-mCherry_LIP5(Y-S)16_1',
-        'F9-F9': 'lipo_VPS60-co-mCherry_LIP5(Y-S)16_1',
-        'F10-F10': 'lipo_eGFP-co-mCherry_LIP5(Y-S)16_1',
-        'F11-F11': 'lipo_noDNA_1'
-    }
-
-    name_dict_2 = {
-        'B2-B2': 'jetprime_SKD1-co-mCherry_LIP5_0',
-        'B3-B3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_0',
-        'B4-B4': 'lipo_SKD1-co-mCherry_LIP5_0',
-        'B5-B5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_0',
-        'B6-B6': 'jetprime_SKD1-co-mCherry_LIP5_0',
-        'B7-B7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_0',
-        'C2-C2': 'jetprime_SKD1-co-mCherry_LIP5_1',
-        'C3-C3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_1',
-        'C4-C4': 'lipo_SKD1-co-mCherry_LIP5_1',
-        'C5-C5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_1',
-        'C6-C6': 'jetprime_SKD1-co-mCherry_LIP5_1',
-        'C7-C7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_1',        
-        'D2-D2': 'jetprime_SKD1-co-mCherry_LIP5_2',
-        'D3-D3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_2',
-        'D4-D4': 'lipo_SKD1-co-mCherry_LIP5_2',
-        'D5-D5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_2',
-        'D6-D6': 'jetprime_SKD1-co-mCherry_LIP5_2',
-        'D7-D7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_2',
-        'E2-E2': 'jetprime_SKD1-co-mCherry_LIP5_3',
-        'E3-E3': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_3',
-        'E4-E4': 'lipo_SKD1-co-mCherry_LIP5_3',
-        'E5-E5': 'lipo_SKD1-co-mCherry_LIP5(Y-S)16_3',
-        'E6-E6': 'jetprime_SKD1-co-mCherry_LIP5_3',
-        'E7-E7': 'jetprime_SKD1-co-mCherry_LIP5(Y-S)16_3',
-    }
-
-    batch_0 = ['2026-04-10', '2026-04-11']
-    batch_1 = ['2026-04-14', '2026-04-15', '2026-04-16', '2026-04-17']
-    batch_2 = ['2026-04-24a', '2026-04-24b']
-
-    # analyze for each batch and name_dict
-    for name_dict, batch in zip([name_dict_0, name_dict_1, name_dict_2], [batch_0, batch_1, batch_2]):
-    
-        # --------------- initalize file_list ---------------
-        if input_path == 'raw_data/':
-            flat_file_list = [input_path + filename for filename in os.listdir(input_path) if any(sub in filename for sub in image_extensions)]
-
-        else:
-            # find subdirectories of interest
-            experiments = batch
-            # if you want all images from all subdirectories in file path, set experiments to 'walk_list'
-            walk_list = [x[0] for x in os.walk(input_path)]
-            walk_list = [item for item in walk_list if any(x in item for x in experiments)]
-
-            # read in all image file names
-            file_list = [[f'{root}/{filename}' for filename in files]
-                        for folder_path in walk_list
-                        for root, dirs, files in os.walk(folder_path)]
-
-            # flatten file_list
-            flat_file_list = [item for sublist in file_list for item in sublist if any(sub in item for sub in image_extensions)]
-
-        # remove images that do not require analysis (e.g., qualitative controls)
-        do_not_quantitate = ['_no-', 'noDNA', 'UT', 'test', 'fewcells', 'poorfocus'] 
-        image_names = [filename for filename in flat_file_list if not any(word in filename for word in do_not_quantitate)]
-
-        # remove duplicates
-        image_names = list(dict.fromkeys(image_names))
-        image_names = [name for name in image_names if '(' in name and 'co_' in name] # keep only images with parentheses in name, which indicates they are from multi-scene acquisitions and need to be split
-
-        # --------------- collect image names and convert ---------------
-        # collect and convert images to np arrays
-        for name in image_names:
-            image_converter(name, output_folder=f'{output_folder}', find_scenes=True, name_dict=name_dict, MIP=True, experiment_prefix=True)
-
-    logger.info('initial cleanup complete :-)')
+    images = discover_images(input_path, experiments, image_extensions,
+                             do_not_quantitate, required_name_parts)
+    logger.info(f'Found {len(images)} images')
+    errors = []
+    for label, path in images:
+        mapping = experiment_mappings.get(label, default_mapping)
+        try:
+            logger.info(f'Processing {label}: {path.name}')
+            image_converter(path, output_folder, label, mapping=mapping,
+                            mode=scene_mode, mip=MIP, prefix=experiment_prefix,
+                            skip=skip_existing)
+        except Exception as exc:
+            logger.exception(f'Failed {path}: {exc}')
+            errors.append(str(path))
+    logger.info(f'Complete: {len(images) - len(errors)}/{len(images)} files without errors')
+    if errors:
+        raise RuntimeError(f'{len(errors)} image(s) failed; inspect log')
