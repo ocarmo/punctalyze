@@ -5,7 +5,7 @@ This repository contains image analysis scripts used in the Boeynaems lab at the
 This repo relies extensively on the following python packages: [CellPose](https://www.cellpose.org/)<sup id="a2">[2](#f2)</sup>, [napari](https://napari.org/)<sup id="a3">[3](#f3)</sup>, and [scikit-image](https://scikit-image.org/)<sup id="a4">[4](#f4)</sup>
 
 ### Reproducing workflow
-See the (associated template)[https://github.com/ocarmo/punctalyze-template] README.md for setup instructions. Run the scripts in the order indicated by the script prefix. To create a suitable conda environment, run each line of the ```environment_setup.md``` in succession in your command prompt. 
+See the [punctalyze-template](https://github.com/boey-lab/boey-analysis-template) README.md for setup instructions. Run the scripts in the order indicated by the script prefix. To create a suitable conda environment, run each line of the ```environment_setup.md``` in succession in your command prompt. 
 
 ## References
 <b id="f1">1.</b> This repository format adapted from https://github.com/ocarmo/EMP1-trafficking_PTP7-analysis [↩](#a1)
